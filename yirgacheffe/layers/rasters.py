@@ -278,7 +278,6 @@ class RasterLayer(YirgacheffeLayer):
         return self._dataset.GetRasterBand(1).DataType
 
     def read_array(self, xoffset, yoffset, xsize, ysize) -> Any:
-        print(f"RasterLayer::read_array file={self._dataset_path}, xoffset={xoffset}, yoffset={yoffset}, xsize={xsize}, ysize={ysize}")
         if self._dataset is None:
             self._unpark()
         if (xsize <= 0) or (ysize <= 0):
@@ -305,10 +304,12 @@ class RasterLayer(YirgacheffeLayer):
 
         if target_window == intersection:
             # The target window is a subset of or equal to the source, so we can just ask for the data
+            print(f"RasterLayer::read_array file={self._dataset_path}, xoffset={intersection.xoff}, yoffset={intersection.yoff}, xsize={intersection.xsize}, ysize={intersection.ysize}")
             data = self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args)
             return data
         else:
             # We should read the intersection from the array, and the rest should be zeros
+            print(f"RasterLayer::read_array file={self._dataset_path}, xoffset={intersection.xoff}, yoffset={intersection.yoff}, xsize={intersection.xsize}, ysize={intersection.ysize}")
             subset = self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args)
             data = numpy.pad(
                 subset,

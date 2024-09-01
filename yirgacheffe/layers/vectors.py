@@ -332,7 +332,6 @@ class VectorLayer(YirgacheffeLayer):
         return self._datatype
 
     def read_array(self, xoffset, yoffset, xsize, ysize):
-        print(f"VectorLayer::read_array file={self._dataset_path}, xoffset={xoffset}, yoffset={yoffset}, xsize={xsize}, ysize={ysize}")
         if self._original is None:
             self._unpark()
         if (xsize <= 0) or (ysize <= 0):
@@ -367,5 +366,6 @@ class VectorLayer(YirgacheffeLayer):
         else:
             raise ValueError("Burn value for layer should be number or field name")
 
+        print(f"VectorLayer::read_array file={self._dataset_path}, xoffset={0}, yoffset={0}, xsize={xsize}, ysize={ysize}")
         res = dataset.ReadAsArray(0, 0, xsize, ysize)
         return res
