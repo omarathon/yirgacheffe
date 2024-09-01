@@ -82,6 +82,7 @@ class UniformAreaLayer(RasterLayer):
         self._raster_xsize = self.window.xsize
 
     def read_array(self, _xoffset, yoffset, _xsize, ysize) -> Any:
+        print(f"UniformAreaLayer::read_array xoffset={_xoffset}, yoffset={yoffset}, xsize={_xsize}, ysize={ysize}")
         if ysize <= 0:
             raise ValueError("Request dimensions must be positive and non-zero")
         offset = self.window.yoff + yoffset

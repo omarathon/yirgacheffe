@@ -32,4 +32,5 @@ class ConstantLayer(YirgacheffeLayer):
         pass
 
     def read_array(self, _x: int, _y: int, xsize: int, ysize: int) -> Any:
+        print(f"ConstantLayer::read_array xoffset={_x}, yoffset={_y}, xsize={xsize}, ysize={ysize}")
         return np.full((ysize, xsize), self.value)

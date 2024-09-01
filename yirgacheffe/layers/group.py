@@ -90,6 +90,7 @@ class GroupLayer(YirgacheffeLayer):
             pass # called from Base constructor before we've added the extra field
 
     def read_array(self, xoffset: int, yoffset: int, xsize: int, ysize: int) -> Any:
+        print(f"GroupLayer::read_array xoffset={xoffset}, yoffset={yoffset}, xsize={xsize}, ysize={ysize}")
         if (xsize <= 0) or (ysize <= 0):
             raise ValueError("Request dimensions must be positive and non-zero")
 
@@ -200,6 +201,7 @@ class TiledGroupLayer(GroupLayer):
     """
 
     def read_array(self, xoffset: int, yoffset: int, xsize: int, ysize: int) -> Any:
+        print(f"TileData::read_array xoffset={xoffset}, yoffset={yoffset}, xsize={xsize}, ysize={ysize}")
         if (xsize <= 0) or (ysize <= 0):
             raise ValueError("Request dimensions must be positive and non-zero")
 

@@ -78,6 +78,7 @@ class H3CellLayer(YirgacheffeLayer):
         return gdal.GDT_CFloat64
 
     def read_array(self, xoffset, yoffset, xsize, ysize):
+        print(f"H3CellLayer::read_array xoffset={xoffset}, yoffset={yoffset}, xsize={xsize}, ysize={ysize}")
         if (xsize <= 0) or (ysize <= 0):
             raise ValueError("Request dimensions must be positive and non-zero")
 

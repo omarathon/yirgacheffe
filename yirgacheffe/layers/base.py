@@ -212,6 +212,7 @@ class YirgacheffeLayer(LayerMathMixin):
         self._active_area = new_area
 
     def read_array(self, _x: int, _y: int, _xsize: int, _ysize: int) -> Any:
+        print(f"YirgacheffeLayer::read_array xoffset={_x}, yoffset={_y}, xsize={xsize}, ysize={ysize}")
         raise NotImplementedError("Must be overridden by subclass")
 
     def latlng_for_pixel(self, x_coord: int, y_coord: int) -> Tuple[float,float]:

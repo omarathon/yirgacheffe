@@ -332,6 +332,7 @@ class VectorLayer(YirgacheffeLayer):
         return self._datatype
 
     def read_array(self, xoffset, yoffset, xsize, ysize):
+        print(f"VectorLayer::read_array xoffset={xoffset}, yoffset={yoffset}, xsize={xsize}, ysize={ysize}")
         if self._original is None:
             self._unpark()
         if (xsize <= 0) or (ysize <= 0):
