@@ -278,7 +278,7 @@ class RasterLayer(YirgacheffeLayer):
         return self._dataset.GetRasterBand(1).DataType
 
     def read_array(self, xoffset, yoffset, xsize, ysize) -> Any:
-        print(f"RasterLayer::read_array xoffset={xoffset}, yoffset={yoffset}, xsize={xsize}, ysize={ysize}")
+        print(f"RasterLayer::read_array file={self._dataset_path}, xoffset={xoffset}, yoffset={yoffset}, xsize={xsize}, ysize={ysize}")
         if self._dataset is None:
             self._unpark()
         if (xsize <= 0) or (ysize <= 0):
