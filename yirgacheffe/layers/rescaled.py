@@ -73,7 +73,7 @@ class RescaledRasterLayer(YirgacheffeLayer):
         ysize: int,
         window: Window,
     ) -> Any:
-
+        print("OMAR: RescaledLayer _read_array_with_window")
         # to avoid aliasing issues, we try to scale to the nearest pixel
         # and recrop when scaling bigger
 

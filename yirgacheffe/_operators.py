@@ -45,6 +45,7 @@ class LayerConstant:
         return str(self.val)
 
     def _eval(self, _area, _projection, _index, _step, _target_window):
+        # print("OMAR: LayerConstant _eval")
         return self.val
 
     @property
@@ -109,6 +110,7 @@ class LayerMathMixin:
         step,
         target_window=None
     ):
+        # print("OMAR: LayerMathMixin _eval")
         try:
             window = self.window if target_window is None else target_window
             return self._read_array_for_area(area, projection, 0, index, window.xsize, step)
@@ -517,7 +519,7 @@ class LayerOperation(LayerMathMixin):
         step: int,
         target_window:Optional[Window]=None
     ):
-
+        # print("OMAR: LayerOperation _eval")
         if self.buffer_padding:
             if target_window:
                 target_window = target_window.grow(self.buffer_padding)
@@ -926,6 +928,7 @@ class LayerOperation(LayerMathMixin):
 class ShaderStyleOperation(LayerOperation):
 
     def _eval(self, area, projection, index, step, target_window=None):
+        # print("OMAR: ShaderStyleOperation _eval")
         if target_window is None:
             target_window = self.window
         lhs_data = self.lhs._eval(area, projection, index, step, target_window)

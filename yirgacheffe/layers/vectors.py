@@ -14,6 +14,8 @@ from .rasters import RasterLayer
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
 
+import time
+
 def _validate_burn_value(burn_value: Any, layer: ogr.Layer) -> DataType: # pylint: disable=R0911
     if isinstance(burn_value, str):
         # burn value is field name, so validate it
@@ -455,6 +457,7 @@ class VectorLayer(YirgacheffeLayer):
         width: int,
         height: int,
     ) -> Any:
+        # print("OMAR: VectorLayer _read_array_for_area")
         projection = target_projection if target_projection is not None else self._projection
         assert projection is not None
 
@@ -492,7 +495,9 @@ class VectorLayer(YirgacheffeLayer):
         else:
             raise ValueError("Burn value for layer should be number or field name")
 
+        t0 = time.time()
         res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
+        print(f"VectorLayer IO {(time.time() - t0) * 1000}")
         return res
 
     def _read_array_with_window(self, _x, _y, _width, _height, _window) -> Any:

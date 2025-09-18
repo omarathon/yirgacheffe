@@ -110,6 +110,7 @@ class GroupLayer(YirgacheffeLayer):
         ysize: int,
         window: Window,
     ) -> Any:
+        print("OMAR: GroupLayer _read_array_with_window")
         if (xsize <= 0) or (ysize <= 0):
             raise ValueError("Request dimensions must be positive and non-zero")
 
@@ -242,6 +243,7 @@ class TiledGroupLayer(GroupLayer):
         ysize: int,
         window: Window,
     ) -> Any:
+        print("OMAR: GroupLayer _read_array_with_window")
         if (xsize <= 0) or (ysize <= 0):
             raise ValueError("Request dimensions must be positive and non-zero")
 

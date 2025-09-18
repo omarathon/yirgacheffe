@@ -13,6 +13,8 @@ from .base import YirgacheffeLayer
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
 
+import time
+
 class InvalidRasterBand(Exception):
     def __init__ (self, band):
         self.band = band
@@ -335,6 +337,7 @@ class RasterLayer(YirgacheffeLayer):
         ysize: int,
         window: Window,
     ) -> Any:
+        # print("OMAR: RasterLayer _read_array_with_window")
         if self._dataset is None:
             self._unpark()
         assert self._dataset
@@ -363,10 +366,14 @@ class RasterLayer(YirgacheffeLayer):
 
         if target_window == intersection:
             # The target window is a subset of or equal to the source, so we can just ask for the data
+            t0 = time.time()
             data = backend.promote(self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args))
+            print(f"RasterLayer IO {(time.time() - t0) * 1000}")
         else:
             # We should read the intersection from the array, and the rest should be zeros
+            t0 = time.time()
             subset = backend.promote(self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args))
+            print(f"RasterLayer IO {(time.time() - t0) * 1000}")
             region = np.array((
                 (
                     (intersection.yoff - window.yoff) - yoffset,

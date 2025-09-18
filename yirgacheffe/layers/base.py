@@ -284,6 +284,7 @@ class YirgacheffeLayer(LayerMathMixin):
         _ysize: int,
         _window: Window,
     ) -> Any:
+        print("OMAR: YirgacheffeLayer _read_array_with_window")
         raise NotImplementedError("Must be overridden by subclass")
 
     def _read_array_for_area(

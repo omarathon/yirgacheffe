@@ -7,6 +7,8 @@ from osgeo import gdal
 from ..window import Area, Window
 from .rasters import RasterLayer
 
+import time
+
 class UniformAreaLayer(RasterLayer):
     """If you have a pixel area map where all the row entries are identical, then you
     can speed up the AoH calculations by simplifying that to a 1 pixel wide map and then
@@ -43,7 +45,9 @@ class UniformAreaLayer(RasterLayer):
             this_step = step
             if (yoffset + this_step) > source.RasterYSize:
                 this_step = source.RasterYSize - yoffset
+            t0 = time.time()
             data = source_band.ReadAsArray(0, yoffset, 1, this_step)
+            print(f"UniformAreaLayer IO {(time.time() - t0) * 1000}")
             target_band.WriteArray(data, 0, yoffset)
 
     @staticmethod
@@ -51,7 +55,9 @@ class UniformAreaLayer(RasterLayer):
         "Check that the dataset conforms to the assumption that all rows contain the same value. Likely to be slow."
         band = dataset.GetRasterBand(1)
         for yoffset in range(dataset.RasterYSize):
+            t0 = time.time()
             row = band.ReadAsArray(0, yoffset, dataset.RasterXSize, 1)
+            print(f"UniformAreaLayer IO {(time.time() - t0) * 1000}")
             if not numpy.all(numpy.isclose(row, row[0])):
                 return False
         return True
@@ -59,8 +65,9 @@ class UniformAreaLayer(RasterLayer):
     def __init__(self, dataset, name: Optional[str] = None, band: int = 1, ignore_nodata: bool = False):
         if dataset.RasterXSize > 1:
             raise ValueError("Expected a shrunk dataset")
+        t0 = time.time()
         self.databand = dataset.GetRasterBand(1).ReadAsArray(0, 0, 1, dataset.RasterYSize)
-
+        print(f"UniformAreaLayer IO {(time.time() - t0) * 1000}")
         super().__init__(dataset, name, band, ignore_nodata)
 
         transform = dataset.GetGeoTransform()
@@ -92,6 +99,7 @@ class UniformAreaLayer(RasterLayer):
         ysize: int,
         window: Window,
     ) -> Any:
+        # print("OMAR: UniformAreaLayer _read_array_with_window")
         if ysize <= 0:
             raise ValueError("Request dimensions must be positive and non-zero")
         offset = window.yoff + yoffset

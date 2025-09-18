@@ -90,6 +90,7 @@ class H3CellLayer(YirgacheffeLayer):
         ysize: int,
         window: Window,
     ) -> Any:
+        print("OMAR: H3Layer _read_array_with_window")
         assert self._projection is not None
 
         if (xsize <= 0) or (ysize <= 0):
