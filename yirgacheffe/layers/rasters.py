@@ -6,12 +6,16 @@ from typing import Any, Optional, Tuple, Union
 import numpy as np
 from osgeo import gdal
 
+from yirgacheffe._backends.numpy import dtype_to_backed
+
 from ..constants import WGS_84_PROJECTION
 from ..window import Area, MapProjection, PixelScale, Window
 from ..rounding import round_up_pixels
 from .base import YirgacheffeLayer
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
+
+from .. import constants
 
 import time
 
@@ -363,17 +367,73 @@ class RasterLayer(YirgacheffeLayer):
             intersection = Window.find_intersection([source_window, target_window])
         except ValueError:
             return backend.zeros((ysize, xsize))
+        
 
         if target_window == intersection:
             # The target window is a subset of or equal to the source, so we can just ask for the data
-            t0 = time.time()
-            data = backend.promote(self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args))
-            print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+
+            if constants.SUBCHUNK_READ_METHOD == 0:
+                t0 = time.time()
+                data = backend.promote(self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args))
+                print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+            else:
+                # subchunking:
+                if constants.SUBCHUNK_READ_METHOD == 1:
+                    t0 = time.time()
+                # print(f"TRACE ysize {intersection.ysize}")
+                band = self._dataset.GetRasterBand(self._band)
+                np_dtype = dtype_to_backed(self.datatype)
+                res = np.empty((intersection.ysize, intersection.xsize), dtype=np_dtype)
+                for yoff in range(0, intersection.ysize, constants.Y_SUBCHUNKS_STEP):
+                    step = min(constants.Y_SUBCHUNKS_STEP, intersection.ysize - yoff)
+                    if constants.SUBCHUNK_READ_METHOD == 2:
+                        t0 = time.time()
+                    res[yoff:yoff+step, :] = band.ReadAsArray(
+                        intersection.xoff,
+                        intersection.yoff + yoff,
+                        intersection.xsize,
+                        step
+                    )
+                    if constants.SUBCHUNK_READ_METHOD == 2:
+                        print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+
+                if constants.SUBCHUNK_READ_METHOD == 1:
+                    print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+
+                data = backend.promote(res)
+            
         else:
             # We should read the intersection from the array, and the rest should be zeros
-            t0 = time.time()
-            subset = backend.promote(self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args))
-            print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+
+            if constants.SUBCHUNK_READ_METHOD == 0:
+                t0 = time.time()
+                subset = backend.promote(self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args))
+                print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+
+            else:
+                # subchunking:
+                if constants.SUBCHUNK_READ_METHOD == 1:
+                    t0 = time.time()
+                # print(f"TRACE ysize {intersection.ysize}")
+                band = self._dataset.GetRasterBand(self._band)
+                np_dtype = dtype_to_backed(self.datatype)
+                subset_res = np.empty((intersection.ysize, intersection.xsize), dtype=np_dtype)
+                for yoff in range(0, intersection.ysize, constants.Y_SUBCHUNKS_STEP):
+                    step = min(constants.Y_SUBCHUNKS_STEP, intersection.ysize - yoff)
+                    if constants.SUBCHUNK_READ_METHOD == 2:
+                        t0 = time.time()
+                    subset_res[yoff:yoff+step, :] = band.ReadAsArray(
+                        intersection.xoff,
+                        intersection.yoff + yoff,
+                        intersection.xsize,
+                        step
+                    )
+                    if constants.SUBCHUNK_READ_METHOD == 2:
+                        print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+                subset = backend.promote(subset_res)
+                if constants.SUBCHUNK_READ_METHOD == 1:
+                    print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+
             region = np.array((
                 (
                     (intersection.yoff - window.yoff) - yoffset,

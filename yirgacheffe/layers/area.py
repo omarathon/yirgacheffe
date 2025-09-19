@@ -67,7 +67,7 @@ class UniformAreaLayer(RasterLayer):
             raise ValueError("Expected a shrunk dataset")
         t0 = time.time()
         self.databand = dataset.GetRasterBand(1).ReadAsArray(0, 0, 1, dataset.RasterYSize)
-        print(f"UniformAreaLayer IO {(time.time() - t0) * 1000}")
+        print(f"UniformAreaLayer width={1} height={dataset.RasterYSize} IO {(time.time() - t0) * 1000}")
         super().__init__(dataset, name, band, ignore_nodata)
 
         transform = dataset.GetGeoTransform()

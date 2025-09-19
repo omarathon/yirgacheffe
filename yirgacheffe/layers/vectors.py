@@ -7,12 +7,17 @@ from typing_extensions import NotRequired
 import deprecation
 from osgeo import gdal, ogr
 
+from yirgacheffe._backends.numpy import dtype_to_backed
+
 from .. import __version__
 from ..window import Area, MapProjection, PixelScale
 from .base import YirgacheffeLayer
 from .rasters import RasterLayer
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
+from .. import constants
+
+import numpy as np
 
 import time
 
@@ -495,9 +500,30 @@ class VectorLayer(YirgacheffeLayer):
         else:
             raise ValueError("Burn value for layer should be number or field name")
 
-        t0 = time.time()
-        res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
-        print(f"VectorLayer IO {(time.time() - t0) * 1000}")
+        # Read in subchunks
+
+        if constants.SUBCHUNK_READ_METHOD == 0:
+            t0 = time.time()
+            res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
+            print(f"VectorLayer IO {(time.time() - t0) * 1000}")
+        else:
+            # subchunking:
+            if constants.SUBCHUNK_READ_METHOD == 1:
+                t0 = time.time()
+            np_dtype = dtype_to_backed(self.datatype)
+            res = np.empty((height, width), dtype=np_dtype)
+            for yoff in range(0, height, constants.Y_SUBCHUNKS_STEP):
+                step = min(constants.Y_SUBCHUNKS_STEP, height - yoff)
+                if constants.SUBCHUNK_READ_METHOD == 2:
+                    t0 = time.time()
+                res[yoff:yoff + step, :] = dataset.ReadAsArray(0, yoff, width, step)
+                if constants.SUBCHUNK_READ_METHOD == 2:
+                    print(f"VectorLayer IO {(time.time() - t0) * 1000}")
+            
+            if constants.SUBCHUNK_READ_METHOD == 1:
+                print(f"VectorLayer IO {(time.time() - t0) * 1000}")
+
+        
         return res
 
     def _read_array_with_window(self, _x, _y, _width, _height, _window) -> Any:
