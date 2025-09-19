@@ -371,6 +371,7 @@ class RasterLayer(YirgacheffeLayer):
 
         if target_window == intersection:
             # The target window is a subset of or equal to the source, so we can just ask for the data
+            print(f"TRACE ysize {intersection.ysize}")
 
             if constants.SUBCHUNK_READ_METHOD == 0:
                 t0 = time.time()
@@ -404,6 +405,7 @@ class RasterLayer(YirgacheffeLayer):
             
         else:
             # We should read the intersection from the array, and the rest should be zeros
+            print(f"TRACE ysize {intersection.ysize}")
 
             if constants.SUBCHUNK_READ_METHOD == 0:
                 t0 = time.time()

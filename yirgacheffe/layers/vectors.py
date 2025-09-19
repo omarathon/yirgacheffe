@@ -502,6 +502,8 @@ class VectorLayer(YirgacheffeLayer):
 
         # Read in subchunks
 
+        print(f"TRACE ysize {height}")
+
         if constants.SUBCHUNK_READ_METHOD == 0:
             t0 = time.time()
             res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
