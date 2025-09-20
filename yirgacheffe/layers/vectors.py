@@ -510,20 +510,20 @@ class VectorLayer(YirgacheffeLayer):
             print(f"VectorLayer IO {(time.time() - t0) * 1000}")
         else:
             # subchunking:
-            if constants.SUBCHUNK_READ_METHOD == 1:
-                t0 = time.time()
+            # if constants.SUBCHUNK_READ_METHOD == 1:
+            t0Full = time.time()
             np_dtype = dtype_to_backed(self.datatype)
             res = np.empty((height, width), dtype=np_dtype)
             for yoff in range(0, height, constants.Y_SUBCHUNKS_STEP):
                 step = min(constants.Y_SUBCHUNKS_STEP, height - yoff)
-                if constants.SUBCHUNK_READ_METHOD == 2:
-                    t0 = time.time()
+                # if constants.SUBCHUNK_READ_METHOD == 2:
+                t0Spec = time.time()
                 res[yoff:yoff + step, :] = dataset.ReadAsArray(0, yoff, width, step)
-                if constants.SUBCHUNK_READ_METHOD == 2:
-                    print(f"VectorLayer IO {(time.time() - t0) * 1000}")
+                # if constants.SUBCHUNK_READ_METHOD == 2:
+                print(f"VectorLayer SpecIO {(time.time() - t0Spec) * 1000}")
             
-            if constants.SUBCHUNK_READ_METHOD == 1:
-                print(f"VectorLayer IO {(time.time() - t0) * 1000}")
+            # if constants.SUBCHUNK_READ_METHOD == 1:
+            print(f"VectorLayer FullIO {(time.time() - t0Full) * 1000}")
 
         
         return res

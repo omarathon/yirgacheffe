@@ -379,27 +379,27 @@ class RasterLayer(YirgacheffeLayer):
                 print(f"RasterLayer IO {(time.time() - t0) * 1000}")
             else:
                 # subchunking:
-                if constants.SUBCHUNK_READ_METHOD == 1:
-                    t0 = time.time()
+                # if constants.SUBCHUNK_READ_METHOD == 1:
+                t0Full = time.time()
                 # print(f"TRACE ysize {intersection.ysize}")
                 band = self._dataset.GetRasterBand(self._band)
                 np_dtype = dtype_to_backed(self.datatype)
                 res = np.empty((intersection.ysize, intersection.xsize), dtype=np_dtype)
                 for yoff in range(0, intersection.ysize, constants.Y_SUBCHUNKS_STEP):
                     step = min(constants.Y_SUBCHUNKS_STEP, intersection.ysize - yoff)
-                    if constants.SUBCHUNK_READ_METHOD == 2:
-                        t0 = time.time()
+                    # if constants.SUBCHUNK_READ_METHOD == 2:
+                    t0Spec = time.time()
                     res[yoff:yoff+step, :] = band.ReadAsArray(
                         intersection.xoff,
                         intersection.yoff + yoff,
                         intersection.xsize,
                         step
                     )
-                    if constants.SUBCHUNK_READ_METHOD == 2:
-                        print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+                    # if constants.SUBCHUNK_READ_METHOD == 2:
+                    print(f"RasterLayer SpecIO {(time.time() - t0Spec) * 1000}")
 
-                if constants.SUBCHUNK_READ_METHOD == 1:
-                    print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+                # if constants.SUBCHUNK_READ_METHOD == 1:
+                print(f"RasterLayer FullIO {(time.time() - t0Full) * 1000}")
 
                 data = backend.promote(res)
             
