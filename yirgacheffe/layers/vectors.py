@@ -504,7 +504,7 @@ class VectorLayer(YirgacheffeLayer):
 
         print(f"TRACE ysize {height}")
 
-        if constants.SUBCHUNK_READ_METHOD == 0:
+        if constants.SUBCHUNK_READ_METHOD != 99:
             t0 = time.time()
             res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
             print(f"VectorLayer IO {(time.time() - t0) * 1000}")
