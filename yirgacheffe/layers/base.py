@@ -10,6 +10,14 @@ from ..window import Area, MapProjection, PixelScale, Window
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
 
+import codec
+import numpy as np
+from .. import constants
+
+import time
+
+
+
 class YirgacheffeLayer(LayerMathMixin):
     """The common base class for the different layer types. Most still inherit from RasterLayer as deep down
     they end up as pixels, but this is a start to make other layers that don't need to rasterize not have
@@ -31,6 +39,13 @@ class YirgacheffeLayer(LayerMathMixin):
         self.name = name
 
         self.reset_window()
+
+        self.compress = False
+        self._cache: dict[Window, Any] = {}
+        self.codec_id = 0
+
+    def enable_compression(self):
+        self.compress = True
 
     def close(self) -> None:
         pass
@@ -312,7 +327,33 @@ class YirgacheffeLayer(LayerMathMixin):
                 (self._projection.ystep * -1.0)
             ),
         )
-        return self._read_array_with_window(x, y, width, height, target_window)
+
+        if self.compress and target_window in self._cache:
+            if (constants.VERBOSE_CACHE):
+                print(f"RasterLayer cache hit")
+            if self.codec_id < 0:
+                result, shape, dtype = self._cache[target_window]
+                return result 
+            handle, shape, dtype = self._cache[target_window]
+            arr = codec.decode_array(handle, np.prod(shape)).reshape(shape)
+            return arr.astype(dtype, copy=False)
+
+        t0 = time.time()
+        result = self._read_array_with_window(x, y, width, height, target_window)
+        t1 = time.time()
+        constants.TIME_SPENT_LOADING += t1 - t0
+
+        if self.compress:
+            if (constants.VERBOSE_CACHE):
+                print(f"RasterLayer cache miss - writing")
+            if self.codec_id < 0:
+                self._cache[target_window] = (result, result.shape, result.dtype)
+            else:
+                handle = codec.make_codec(self.codec_id)
+                codec.encode_array(handle, result.astype(np.int32))
+                self._cache[target_window] = (handle, result.shape, result.dtype)
+            
+        return result
 
     def _read_array(self, x: int, y: int, width: int, height: int) -> Any:
         return self._read_array_with_window(x, y, width, height, self.window)

@@ -14,6 +14,13 @@ from .rasters import RasterLayer
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
 
+import codec
+import numpy as np
+
+from .. import constants
+
+import time
+
 def _validate_burn_value(burn_value: Any, layer: ogr.Layer) -> DataType: # pylint: disable=R0911
     if isinstance(burn_value, str):
         # burn value is field name, so validate it
@@ -366,6 +373,7 @@ class VectorLayer(YirgacheffeLayer):
         )
 
         super().__init__(area, projection)
+        self._cache: dict[tuple, Any] = {}  # override cache key type
 
 
     def _get_operation_area(self, projection: Optional[MapProjection]=None) -> Area:
@@ -458,6 +466,30 @@ class VectorLayer(YirgacheffeLayer):
         projection = target_projection if target_projection is not None else self._projection
         assert projection is not None
 
+        # Define cache key directly from arguments
+        cache_key = (
+            float(target_area.left),
+            float(target_area.top),
+            float(target_area.right),
+            float(target_area.bottom),
+            int(x), int(y), int(width), int(height),
+            projection.name
+        )
+
+        # Cache hit
+        if self.compress and cache_key in self._cache:
+            if (constants.VERBOSE_CACHE):
+                print(f"VectorLayer cache hit")
+            if self.codec_id < 0:
+                result, shape, dtype = self._cache[cache_key]
+                return result
+            else:
+                handle, shape, dtype = self._cache[cache_key]
+                arr = codec.decode_array(handle, np.prod(shape)).reshape(shape)
+                return arr.astype(dtype, copy=False)
+            
+        t0 = time.time()
+
         if self._original is None:
             self._unpark()
         if (width <= 0) or (height <= 0):
@@ -493,6 +525,21 @@ class VectorLayer(YirgacheffeLayer):
             raise ValueError("Burn value for layer should be number or field name")
 
         res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
+
+        t1 = time.time()
+        constants.TIME_SPENT_LOADING += t1 - t0
+
+        # Cache miss → encode and store
+        if self.compress:
+            if (constants.VERBOSE_CACHE):
+                print(f"VectorLayer cache miss - writing")
+            if self.codec_id < 0:
+                self._cache[cache_key] = (res, res.shape, res.dtype)
+            else:
+                handle = codec.make_codec(self.codec_id)
+                codec.encode_array(handle, res.astype(np.int32))
+                self._cache[cache_key] = (handle, res.shape, res.dtype)
+
         return res
 
     def _read_array_with_window(self, _x, _y, _width, _height, _window) -> Any:

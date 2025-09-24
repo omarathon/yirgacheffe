@@ -193,6 +193,15 @@ class Window:
     xsize: int
     ysize: int
 
+    def __eq__(self, other):
+        if not isinstance(other, Window):
+            return NotImplemented
+        return (self.xoff, self.yoff, self.xsize, self.ysize) == \
+               (other.xoff, other.yoff, other.xsize, other.ysize)
+
+    def __hash__(self):
+        return hash((self.xoff, self.yoff, self.xsize, self.ysize))
+
     @property
     def as_array_args(self) -> Tuple[int,...]:
         """A tuple containing xoff, yoff, xsize, and ysize."""

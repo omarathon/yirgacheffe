@@ -27,6 +27,10 @@ from ._backends import backend
 from ._backends.enumeration import operators as op
 from ._backends.enumeration import dtype as DataType
 
+import codec
+
+import time
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
@@ -362,6 +366,10 @@ class LayerOperation(LayerMathMixin):
         else:
             self.other = None
 
+        self.compress = False
+        self._cache: dict[tuple, Any] = {}
+        self.codec_id = 0
+
     def __str__(self) -> str:
         try:
             return f"({self.lhs} {self.operator} {self.rhs})"
@@ -525,34 +533,67 @@ class LayerOperation(LayerMathMixin):
             # The index doesn't need updating because we updated area/window
             step += (2 * self.buffer_padding)
 
-        lhs_data = self.lhs._eval(area, projection, index, step, target_window)
+        cache_key = (
+            float(area.left), float(area.top),
+            float(area.right), float(area.bottom),
+            int(index), int(step),
+            projection.name if projection else None
+        )
 
-        if self.operator is None:
-            return lhs_data
+        if self.compress and cache_key in self._cache:
+            if (constants.VERBOSE_CACHE):
+                print(f"LayerOperation cache hit")
+            if self.codec_id < 0:
+                result, shape, dtype = self._cache[cache_key]
+                return result
+            else:
+                handle, shape, dtype = self._cache[cache_key]
+                arr = codec.decode_array(handle, np.prod(shape)).reshape(shape)
+                return arr.astype(dtype, copy=False)
 
-        try:
-            operator: Callable = backend.operator_map[self.operator]
-        except KeyError:
-            # Handles things like `numpy_apply` where a custom operator is provided
-            operator = self.operator
+        def compute():
+            lhs_data = self.lhs._eval(area, projection, index, step, target_window)
 
-        if self.other is not None:
-            assert self.rhs is not None
-            rhs_data = self.rhs._eval(area, projection, index, step, target_window)
-            other_data = self.other._eval(area, projection, index, step, target_window)
-            return operator(lhs_data, rhs_data, other_data, **self.kwargs)
+            if self.operator is None:
+                return lhs_data
 
-        if self.rhs is not None:
-            rhs_data = self.rhs._eval(area, projection, index, step, target_window)
-            return operator(lhs_data, rhs_data, **self.kwargs)
+            try:
+                operator: Callable = backend.operator_map[self.operator]
+            except KeyError:
+                # Handles things like `numpy_apply` where a custom operator is provided
+                operator = self.operator
 
-        return operator(lhs_data, **self.kwargs)
+            if self.other is not None:
+                assert self.rhs is not None
+                rhs_data = self.rhs._eval(area, projection, index, step, target_window)
+                other_data = self.other._eval(area, projection, index, step, target_window)
+                return operator(lhs_data, rhs_data, other_data, **self.kwargs)
+
+            if self.rhs is not None:
+                rhs_data = self.rhs._eval(area, projection, index, step, target_window)
+                return operator(lhs_data, rhs_data, **self.kwargs)
+
+            return operator(lhs_data, **self.kwargs)
+        
+        result = compute()
+        if self.compress:
+            if (constants.VERBOSE_CACHE):
+                print(f"LayerOperation cache miss - writing")
+            if self.codec_id < 0:
+                self._cache[cache_key] = (result, result.shape, result.dtype)
+            else:
+                handle = codec.make_codec(self.codec_id)
+                codec.encode_array(handle, result.astype(np.int32))
+                self._cache[cache_key] = (handle, result.shape, result.dtype)
+        
+        return result
 
     def sum(self):
         # The result accumulator is float64, and for precision reasons
         # we force the sum to be done in float64 also. Otherwise we
         # see variable results depending on chunk size, as different parts
         # of the sum are done in different types.
+        t0 = time.time()
         res = 0.0
         computation_window = self.window
         projection = self.map_projection
@@ -561,7 +602,11 @@ class LayerOperation(LayerMathMixin):
             if yoffset+step > computation_window.ysize:
                 step = computation_window.ysize - yoffset
             chunk = self._eval(self._get_operation_area(projection), projection, yoffset, step, computation_window)
-            res += backend.sum_op(chunk)
+            res += float(backend.sum_op(chunk))
+            del chunk
+            # gc.collect()
+        t1 = time.time()
+        constants.TIME_SPENT_CALCULATING += t1 - t0
         return res
 
     def min(self):
@@ -597,6 +642,8 @@ class LayerOperation(LayerMathMixin):
         Calling save will write the output of the operation to the provied layer.
         If you provide sum as true it will additionall compute the sum and return that.
         """
+
+        t0 = time.time()
 
         if destination_layer is None:
             raise ValueError("Layer is required")
@@ -643,15 +690,25 @@ class LayerOperation(LayerMathMixin):
             chunk = self._eval(computation_area, projection, yoffset, step, computation_window)
             if isinstance(chunk, (float, int)):
                 chunk = backend.full((step, destination_window.xsize), chunk)
+            t00 = time.time()
             band.WriteArray(
                 backend.demote_array(chunk),
                 destination_window.xoff,
                 yoffset + destination_window.yoff,
             )
+            t11 = time.time()
+            constants.TIME_SPENT_WRITING += t11 - t00
             if and_sum:
-                total += backend.sum_op(chunk)
+                total += float(backend.sum_op(chunk))
+
+            del chunk
+            # gc.collect()
+
         if callback:
             callback(1.0)
+
+        t1 = time.time()
+        constants.TIME_SPENT_CALCULATING += t1 - t0
 
         return total if and_sum else None
 
