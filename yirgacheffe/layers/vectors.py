@@ -502,12 +502,12 @@ class VectorLayer(YirgacheffeLayer):
 
         # Read in subchunks
 
-        print(f"TRACE ysize {height}")
+        # print(f"TRACE ysize {height}")
 
         if constants.SUBCHUNK_READ_METHOD != 99:
             t0 = time.time()
             res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
-            print(f"VectorLayer IO {(time.time() - t0) * 1000}")
+            # print(f"VectorLayer IO {(time.time() - t0) * 1000}")
         else:
             # subchunking:
             # if constants.SUBCHUNK_READ_METHOD == 1:
@@ -520,10 +520,10 @@ class VectorLayer(YirgacheffeLayer):
                 t0Spec = time.time()
                 res[yoff:yoff + step, :] = dataset.ReadAsArray(0, yoff, width, step)
                 # if constants.SUBCHUNK_READ_METHOD == 2:
-                print(f"VectorLayer SpecIO {(time.time() - t0Spec) * 1000}")
+                # print(f"VectorLayer SpecIO {(time.time() - t0Spec) * 1000}")
             
             # if constants.SUBCHUNK_READ_METHOD == 1:
-            print(f"VectorLayer FullIO {(time.time() - t0Full) * 1000}")
+            # print(f"VectorLayer FullIO {(time.time() - t0Full) * 1000}")
 
         
         return res

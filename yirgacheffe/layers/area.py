@@ -47,7 +47,7 @@ class UniformAreaLayer(RasterLayer):
                 this_step = source.RasterYSize - yoffset
             t0 = time.time()
             data = source_band.ReadAsArray(0, yoffset, 1, this_step)
-            print(f"UniformAreaLayer IO {(time.time() - t0) * 1000}")
+            # print(f"UniformAreaLayer IO {(time.time() - t0) * 1000}")
             target_band.WriteArray(data, 0, yoffset)
 
     @staticmethod
@@ -57,7 +57,7 @@ class UniformAreaLayer(RasterLayer):
         for yoffset in range(dataset.RasterYSize):
             t0 = time.time()
             row = band.ReadAsArray(0, yoffset, dataset.RasterXSize, 1)
-            print(f"UniformAreaLayer IO {(time.time() - t0) * 1000}")
+            # print(f"UniformAreaLayer IO {(time.time() - t0) * 1000}")
             if not numpy.all(numpy.isclose(row, row[0])):
                 return False
         return True
@@ -67,7 +67,7 @@ class UniformAreaLayer(RasterLayer):
             raise ValueError("Expected a shrunk dataset")
         t0 = time.time()
         self.databand = dataset.GetRasterBand(1).ReadAsArray(0, 0, 1, dataset.RasterYSize)
-        print(f"UniformAreaLayer width={1} height={dataset.RasterYSize} IO {(time.time() - t0) * 1000}")
+        # print(f"UniformAreaLayer width={1} height={dataset.RasterYSize} IO {(time.time() - t0) * 1000}")
         super().__init__(dataset, name, band, ignore_nodata)
 
         transform = dataset.GetGeoTransform()

@@ -371,12 +371,12 @@ class RasterLayer(YirgacheffeLayer):
 
         if target_window == intersection:
             # The target window is a subset of or equal to the source, so we can just ask for the data
-            print(f"TRACE ysize {intersection.ysize}")
+            # print(f"TRACE ysize {intersection.ysize}")
 
             if constants.SUBCHUNK_READ_METHOD == 0:
                 t0 = time.time()
                 data = backend.promote(self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args))
-                print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+                # print(f"RasterLayer IO {(time.time() - t0) * 1000}")
             else:
                 # subchunking:
                 # if constants.SUBCHUNK_READ_METHOD == 1:
@@ -396,21 +396,21 @@ class RasterLayer(YirgacheffeLayer):
                         step
                     )
                     # if constants.SUBCHUNK_READ_METHOD == 2:
-                    print(f"RasterLayer SpecIO {(time.time() - t0Spec) * 1000}")
+                    # print(f"RasterLayer SpecIO {(time.time() - t0Spec) * 1000}")
 
                 # if constants.SUBCHUNK_READ_METHOD == 1:
-                print(f"RasterLayer FullIO {(time.time() - t0Full) * 1000}")
+                # print(f"RasterLayer FullIO {(time.time() - t0Full) * 1000}")
 
                 data = backend.promote(res)
             
         else:
             # We should read the intersection from the array, and the rest should be zeros
-            print(f"TRACE ysize {intersection.ysize}")
+            # print(f"TRACE ysize {intersection.ysize}")
 
             if constants.SUBCHUNK_READ_METHOD == 0:
                 t0 = time.time()
                 subset = backend.promote(self._dataset.GetRasterBand(self._band).ReadAsArray(*intersection.as_array_args))
-                print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+                # print(f"RasterLayer IO {(time.time() - t0) * 1000}")
 
             else:
                 # subchunking:
@@ -430,11 +430,11 @@ class RasterLayer(YirgacheffeLayer):
                         intersection.xsize,
                         step
                     )
-                    if constants.SUBCHUNK_READ_METHOD == 2:
-                        print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+                    # if constants.SUBCHUNK_READ_METHOD == 2:
+                        # print(f"RasterLayer IO {(time.time() - t0) * 1000}")
                 subset = backend.promote(subset_res)
-                if constants.SUBCHUNK_READ_METHOD == 1:
-                    print(f"RasterLayer IO {(time.time() - t0) * 1000}")
+                # if constants.SUBCHUNK_READ_METHOD == 1:
+                    # print(f"RasterLayer IO {(time.time() - t0) * 1000}")
 
             region = np.array((
                 (
