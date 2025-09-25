@@ -31,6 +31,8 @@ import codec
 
 import time
 
+from memory_profiler import profile
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
@@ -48,7 +50,7 @@ class LayerConstant:
     def __str__(self) -> str:
         return str(self.val)
 
-    def _eval(self, _area, _projection, _index, _step, _target_window):
+    def _eval(self, _area, _projection, _index, _step, _target_window, x, xstep):
         return self.val
 
     @property
@@ -57,6 +59,16 @@ class LayerConstant:
 
     def _get_operation_area(self, _projection) -> Area:
         return Area.world()
+    
+    def _stage(
+        self,
+        area,
+        projection,
+        index,
+        step,
+        target_window=None
+    ):
+        return
 
 class LayerMathMixin:
 
@@ -88,16 +100,16 @@ class LayerMathMixin:
         return LayerOperation(self, op.NE, other, window_op=WindowOperation.UNION)
 
     def __lt__(self, other):
-        return LayerOperation(self, op.LT, other, window_op=WindowOperation.UNION)
+        return LayerOperation(self, op.LT, other, window_op=WindowOperation.INTERSECTION)
 
     def __le__(self, other):
-        return LayerOperation(self, op.LE, other, window_op=WindowOperation.UNION)
+        return LayerOperation(self, op.LE, other, window_op=WindowOperation.INTERSECTION)
 
     def __gt__(self, other):
-        return LayerOperation(self, op.GT, other, window_op=WindowOperation.UNION)
+        return LayerOperation(self, op.GT, other, window_op=WindowOperation.INTERSECTION)
 
     def __ge__(self, other):
-        return LayerOperation(self, op.GE, other, window_op=WindowOperation.UNION)
+        return LayerOperation(self, op.GE, other, window_op=WindowOperation.INTERSECTION)
 
     def __and__(self, other):
         return LayerOperation(self, op.AND, other, window_op=WindowOperation.INTERSECTION)
@@ -111,13 +123,38 @@ class LayerMathMixin:
         projection,
         index,
         step,
+        target_window=None,
+        x: int = 0,
+        xstep: Optional[int] = None,
+    ):
+        try:
+            window = self.window if target_window is None else target_window
+            width = xstep if xstep is not None else window.xsize
+            return self._read_array_for_area(area, projection, x, index, width, step)
+        except AttributeError:
+            width = xstep if xstep is not None else (target_window.xsize if target_window else 1)
+            return self._read_array_for_area(
+                area,
+                projection,
+                x,
+                index,
+                width,
+                step
+            )
+            
+    def _stage(
+        self,
+        area,
+        projection,
+        index,
+        step,
         target_window=None
     ):
         try:
             window = self.window if target_window is None else target_window
-            return self._read_array_for_area(area, projection, 0, index, window.xsize, step)
+            self._stage_for_area(area, projection, 0, index, window.xsize, step)
         except AttributeError:
-            return self._read_array_for_area(
+            self._stage_for_area(
                 area,
                 projection,
                 0,
@@ -516,6 +553,34 @@ class LayerOperation(LayerMathMixin):
             except AttributeError:
                 pass
         return projection
+    
+    def _stage(
+        self,
+        area: Area,
+        projection: MapProjection,
+        index: int,
+        step: int,
+        target_window:Optional[Window]=None
+    ):
+        if self.buffer_padding:
+            if target_window:
+                target_window = target_window.grow(self.buffer_padding)
+            area = area.grow(self.buffer_padding * projection.xstep)
+            # The index doesn't need updating because we updated area/window
+            step += (2 * self.buffer_padding)
+
+        # Always use the child’s own window if it has one
+        lhs_window = getattr(self.lhs, "window", target_window)
+        self.lhs._stage(area, projection, index, step, lhs_window)
+
+        if self.rhs is not None:
+            rhs_window = getattr(self.rhs, "window", target_window)
+            self.rhs._stage(area, projection, index, step, rhs_window)
+
+        if self.other is not None:
+            other_window = getattr(self.other, "window", target_window)
+            self.other._stage(area, projection, index, step, other_window)
+        
 
     def _eval(
         self,
@@ -523,7 +588,9 @@ class LayerOperation(LayerMathMixin):
         projection: MapProjection,
         index: int,
         step: int,
-        target_window:Optional[Window]=None
+        target_window: Optional[Window] = None,
+        x: int = 0,
+        xstep: Optional[int] = None,
     ):
 
         if self.buffer_padding:
@@ -533,10 +600,13 @@ class LayerOperation(LayerMathMixin):
             # The index doesn't need updating because we updated area/window
             step += (2 * self.buffer_padding)
 
+        width = xstep if xstep is not None else (target_window.xsize if target_window else 1)
+
         cache_key = (
             float(area.left), float(area.top),
             float(area.right), float(area.bottom),
             int(index), int(step),
+            int(x), int(width),
             projection.name if projection else None
         )
 
@@ -544,7 +614,7 @@ class LayerOperation(LayerMathMixin):
             if (constants.VERBOSE_CACHE):
                 print(f"LayerOperation cache hit")
             if self.codec_id < 0:
-                result, shape, dtype = self._cache[cache_key]
+                result, _, _ = self._cache[cache_key]
                 return result
             else:
                 handle, shape, dtype = self._cache[cache_key]
@@ -552,7 +622,7 @@ class LayerOperation(LayerMathMixin):
                 return arr.astype(dtype, copy=False)
 
         def compute():
-            lhs_data = self.lhs._eval(area, projection, index, step, target_window)
+            lhs_data = self.lhs._eval(area, projection, index, step, target_window, x=x, xstep=width)
 
             if self.operator is None:
                 return lhs_data
@@ -560,21 +630,20 @@ class LayerOperation(LayerMathMixin):
             try:
                 operator: Callable = backend.operator_map[self.operator]
             except KeyError:
-                # Handles things like `numpy_apply` where a custom operator is provided
                 operator = self.operator
 
             if self.other is not None:
                 assert self.rhs is not None
-                rhs_data = self.rhs._eval(area, projection, index, step, target_window)
-                other_data = self.other._eval(area, projection, index, step, target_window)
+                rhs_data = self.rhs._eval(area, projection, index, step, target_window, x=x, xstep=width)
+                other_data = self.other._eval(area, projection, index, step, target_window, x=x, xstep=width)
                 return operator(lhs_data, rhs_data, other_data, **self.kwargs)
 
             if self.rhs is not None:
-                rhs_data = self.rhs._eval(area, projection, index, step, target_window)
+                rhs_data = self.rhs._eval(area, projection, index, step, target_window, x=x, xstep=width)
                 return operator(lhs_data, rhs_data, **self.kwargs)
 
             return operator(lhs_data, **self.kwargs)
-        
+
         result = compute()
         if self.compress:
             if (constants.VERBOSE_CACHE):
@@ -585,7 +654,7 @@ class LayerOperation(LayerMathMixin):
                 handle = codec.make_codec(self.codec_id)
                 codec.encode_array(handle, result.astype(np.int32))
                 self._cache[cache_key] = (handle, result.shape, result.dtype)
-        
+
         return result
 
     def sum(self):
@@ -597,14 +666,37 @@ class LayerOperation(LayerMathMixin):
         res = 0.0
         computation_window = self.window
         projection = self.map_projection
+
+        area = self._get_operation_area(projection)
+
+        # Outer loop: ystep (big vertical stride)
         for yoffset in range(0, computation_window.ysize, self.ystep):
-            step=self.ystep
-            if yoffset+step > computation_window.ysize:
-                step = computation_window.ysize - yoffset
-            chunk = self._eval(self._get_operation_area(projection), projection, yoffset, step, computation_window)
-            res += float(backend.sum_op(chunk))
-            del chunk
-            # gc.collect()
+            # self.checkpoint()
+            step = min(self.ystep, computation_window.ysize - yoffset)
+
+            self._stage(area, projection, yoffset, step, computation_window)
+
+            # Inner loop: sub-blocks in Y inside this ystep
+            for ysub in range(0, step, constants.SUB_BLOCK_HEIGHT):
+                ysubstep = min(constants.SUB_BLOCK_HEIGHT, step - ysub)
+
+                # Iterate over tiles in X direction
+                for xoffset in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH):
+                    xstep = min(constants.SUB_BLOCK_WIDTH, computation_window.xsize - xoffset)
+
+                    # Only materialize this tile
+                    tile = self._eval(
+                        self._get_operation_area(projection),
+                        projection,
+                        yoffset + ysub,   # absolute y offset
+                        ysubstep,         # tile height
+                        computation_window,
+                        x=xoffset,
+                        xstep=xstep,
+                    )
+                    res += float(backend.sum_op(tile))
+                    del tile
+
         t1 = time.time()
         constants.TIME_SPENT_CALCULATING += t1 - t0
         return res
@@ -684,25 +776,50 @@ class LayerOperation(LayerMathMixin):
         for yoffset in range(0, computation_window.ysize, self.ystep):
             if callback:
                 callback(yoffset / computation_window.ysize)
-            step=self.ystep
-            if yoffset+step > computation_window.ysize:
-                step = computation_window.ysize - yoffset
-            chunk = self._eval(computation_area, projection, yoffset, step, computation_window)
-            if isinstance(chunk, (float, int)):
-                chunk = backend.full((step, destination_window.xsize), chunk)
-            t00 = time.time()
-            band.WriteArray(
-                backend.demote_array(chunk),
-                destination_window.xoff,
-                yoffset + destination_window.yoff,
-            )
-            t11 = time.time()
-            constants.TIME_SPENT_WRITING += t11 - t00
-            if and_sum:
-                total += float(backend.sum_op(chunk))
 
-            del chunk
-            # gc.collect()
+            step = min(self.ystep, computation_window.ysize - yoffset)
+
+            self._stage(computation_area, projection, yoffset, step, computation_window)
+
+            for ysub in range(0, step, constants.SUB_BLOCK_HEIGHT):
+                ysubstep = min(constants.SUB_BLOCK_HEIGHT, step - ysub)
+
+                # allocate buffer row strip for this ysub block (all X tiles)
+                row_buf = None
+
+                for xoffset in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH):
+                    xstep = min(constants.SUB_BLOCK_WIDTH, computation_window.xsize - xoffset)
+
+                    tile = self._eval(
+                        computation_area,
+                        projection,
+                        yoffset + ysub,
+                        ysubstep,
+                        computation_window,
+                        x=xoffset,
+                        xstep=xstep,
+                    )
+                    if isinstance(tile, (float, int)):
+                        tile = backend.full((ysubstep, xstep), tile)
+                    if row_buf is None:
+                        # use tile dtype to match operator output
+                        row_buf = np.zeros((ysubstep, computation_window.xsize), dtype=tile.dtype)
+
+                    row_buf[:, xoffset:xoffset+xstep] = tile
+                    if and_sum:
+                        total += float(backend.sum_op(tile))
+                    del tile
+
+                # write the row_buf in one call
+                t00 = time.time()
+                band.WriteArray(
+                    backend.demote_array(row_buf),
+                    destination_window.xoff,
+                    yoffset + ysub + destination_window.yoff,
+                )
+                t11 = time.time()
+                constants.TIME_SPENT_WRITING += t11 - t00
+                del row_buf
 
         if callback:
             callback(1.0)

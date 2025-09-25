@@ -7,6 +7,8 @@ from typing_extensions import NotRequired
 import deprecation
 from osgeo import gdal, ogr
 
+from yirgacheffe._backends.numpy import dtype_to_backed
+
 from .. import __version__
 from ..window import Area, MapProjection, PixelScale
 from .base import YirgacheffeLayer
@@ -453,6 +455,82 @@ class VectorLayer(YirgacheffeLayer):
     @property
     def datatype(self) -> DataType:
         return self._datatype
+    
+    def _stage_for_area(
+        self,
+        target_area: Area,
+        target_projection: Optional[MapProjection],
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+    ):
+        projection = target_projection if target_projection is not None else self._projection
+        assert projection is not None
+
+        # Define cache key directly from arguments
+        cache_key = (
+            int(y)
+        )
+
+        if not self.compress or cache_key in self._cache:
+            return
+
+        t0 = time.time()
+
+        if self._original is None:
+            self._unpark()
+        if (width <= 0) or (height <= 0):
+            raise ValueError("Request dimensions must be positive and non-zero")
+
+        # I did try recycling this object to save allocation/dealloction, but in practice it
+        # seemed to only make things slower (particularly as you need to zero the memory each time yourself)
+        dataset = gdal.GetDriverByName('mem').Create(
+            'mem',
+            width,
+            height,
+            1,
+            self.datatype.to_gdal(),
+            []
+        )
+        if not dataset:
+            raise MemoryError('Failed to create memory mask')
+
+        dataset.SetProjection(projection.name)
+        dataset.SetGeoTransform([
+            target_area.left + (x * projection.xstep),
+            projection.xstep,
+            0.0,
+            target_area.top + (y * projection.ystep),
+            0.0,
+            projection.ystep
+        ])
+        if isinstance(self.burn_value, (int, float)):
+            gdal.RasterizeLayer(dataset, [1], self.layer, burn_values=[self.burn_value], options=["ALL_TOUCHED=TRUE"])
+        elif isinstance(self.burn_value, str):
+            gdal.RasterizeLayer(dataset, [1], self.layer, options=[f"ATTRIBUTE={self.burn_value}", "ALL_TOUCHED=TRUE"])
+        else:
+            raise ValueError("Burn value for layer should be number or field name")
+
+        res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
+
+        t1 = time.time()
+        constants.TIME_SPENT_LOADING += t1 - t0
+
+        if (constants.VERBOSE_CACHE):
+            print(f"VectorLayer staging")
+        if self.codec_id < 0:
+            self._cache[cache_key] = (res, x, y, res.shape, res.dtype)
+        else:
+            cb = codec.CachedBlock(
+                res.astype(np.int32),
+                res.shape[1], res.shape[0],
+                constants.SUB_BLOCK_WIDTH, constants.SUB_BLOCK_HEIGHT,
+                self.codec_id,
+                x, y
+            )
+            self._cache[cache_key] = cb
+        
 
     def _read_array_for_area(
         self,
@@ -466,27 +544,53 @@ class VectorLayer(YirgacheffeLayer):
         projection = target_projection if target_projection is not None else self._projection
         assert projection is not None
 
+        y_block = (int(y) // constants.YSTEP) * constants.YSTEP
+
         # Define cache key directly from arguments
         cache_key = (
-            float(target_area.left),
-            float(target_area.top),
-            float(target_area.right),
-            float(target_area.bottom),
-            int(x), int(y), int(width), int(height),
-            projection.name
+            int(y_block)
         )
 
-        # Cache hit
         if self.compress and cache_key in self._cache:
             if (constants.VERBOSE_CACHE):
                 print(f"VectorLayer cache hit")
             if self.codec_id < 0:
-                result, shape, dtype = self._cache[cache_key]
-                return result
+                result, origin_x, origin_y, shape, dtype = self._cache[cache_key]
+                local_x = x - origin_x
+                local_y = y - origin_y
+                return result[local_y:local_y+height, local_x:local_x+width]
             else:
-                handle, shape, dtype = self._cache[cache_key]
-                arr = codec.decode_array(handle, np.prod(shape)).reshape(shape)
-                return arr.astype(dtype, copy=False)
+                block: codec.CachedBlock = self._cache[cache_key]
+
+                # Adjust x,y to block-local coordinates
+                local_x = x - block.origin_x
+                local_y = y - block.origin_y
+
+                tiles_x = range(
+                    local_x // constants.SUB_BLOCK_WIDTH,
+                    (local_x + width + constants.SUB_BLOCK_WIDTH - 1) // constants.SUB_BLOCK_WIDTH
+                )
+                tiles_y = range(
+                    local_y // constants.SUB_BLOCK_HEIGHT,
+                    (local_y + height + constants.SUB_BLOCK_HEIGHT - 1) // constants.SUB_BLOCK_HEIGHT
+                )
+
+                out = np.zeros((height, width), dtype=np.int32)
+                for ty in tiles_y:
+                    for tx in tiles_x:
+                        tile = block.decode_tile(tx, ty)
+                        x0, y0 = tx * constants.SUB_BLOCK_WIDTH, ty * constants.SUB_BLOCK_HEIGHT
+                        x1, y1 = x0 + tile.shape[1], y0 + tile.shape[0]
+                        ox0 = max(local_x, x0)
+                        oy0 = max(local_y, y0)
+                        ox1 = min(local_x + width, x1)
+                        oy1 = min(local_y + height, y1)
+                        if ox1 > ox0 and oy1 > oy0:
+                            out[oy0-local_y:oy1-local_y, ox0-local_x:ox1-local_x] = \
+                                tile[oy0-y0:oy1-y0, ox0-x0:ox1-x0]
+                return out.astype(dtype_to_backed(self.datatype))
+        else:
+            assert False
             
         t0 = time.time()
 
@@ -529,16 +633,20 @@ class VectorLayer(YirgacheffeLayer):
         t1 = time.time()
         constants.TIME_SPENT_LOADING += t1 - t0
 
-        # Cache miss → encode and store
-        if self.compress:
-            if (constants.VERBOSE_CACHE):
-                print(f"VectorLayer cache miss - writing")
-            if self.codec_id < 0:
-                self._cache[cache_key] = (res, res.shape, res.dtype)
-            else:
-                handle = codec.make_codec(self.codec_id)
-                codec.encode_array(handle, res.astype(np.int32))
-                self._cache[cache_key] = (handle, res.shape, res.dtype)
+       # Cache miss → encode and store
+        # if self.compress:
+        #     if (constants.VERBOSE_CACHE):
+        #         print(f"VectorLayer cache miss - writing")
+        #     if self.codec_id < 0:
+        #         self._cache[cache_key] = (res, res.shape, res.dtype)
+        #     else:
+        #         cb = codec.CachedBlock(
+        #             res.astype(np.int32),
+        #             res.shape[1], res.shape[0],
+        #             constants.SUB_BLOCK_WIDTH, constants.SUB_BLOCK_HEIGHT,
+        #             self.codec_id
+        #         )
+        #         self._cache[cache_key] = cb
 
         return res
 

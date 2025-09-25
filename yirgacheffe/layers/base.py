@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any, Optional, Sequence, Tuple
 
 import deprecation
+from yirgacheffe._backends.numpy import dtype_to_backed
 
 from .. import __version__
 from .._operators import LayerMathMixin
@@ -300,18 +301,22 @@ class YirgacheffeLayer(LayerMathMixin):
         _window: Window,
     ) -> Any:
         raise NotImplementedError("Must be overridden by subclass")
-
-    def _read_array_for_area(
+    
+    def _stage_for_area(
         self,
         target_area: Area,
         target_projection: MapProjection,
         x: int,
         y: int,
         width: int,
-        height: int,
-    ) -> Any:
+        height: int
+    ):
         assert self._projection is not None
         assert self._projection == target_projection
+        
+        cache_key = (
+            int(y)
+        )
 
         target_window = Window(
             xoff=round_down_pixels((target_area.left - self._underlying_area.left) / self._projection.xstep,
@@ -328,30 +333,131 @@ class YirgacheffeLayer(LayerMathMixin):
             ),
         )
 
-        if self.compress and target_window in self._cache:
-            if (constants.VERBOSE_CACHE):
-                print(f"RasterLayer cache hit")
-            if self.codec_id < 0:
-                result, shape, dtype = self._cache[target_window]
-                return result 
-            handle, shape, dtype = self._cache[target_window]
-            arr = codec.decode_array(handle, np.prod(shape)).reshape(shape)
-            return arr.astype(dtype, copy=False)
+        if not self.compress or cache_key in self._cache:
+            return
 
         t0 = time.time()
         result = self._read_array_with_window(x, y, width, height, target_window)
         t1 = time.time()
         constants.TIME_SPENT_LOADING += t1 - t0
 
-        if self.compress:
+        if (constants.VERBOSE_CACHE):
+            print(f"RasterLayer stage")
+        if self.codec_id < 0:
+            self._cache[cache_key] = (result, target_window.xoff, target_window.yoff, result.shape, result.dtype)
+        else:
+            data = result.astype(np.int32)
+            minimum = data.min()
+            if minimum < 0:
+                data -= minimum
+            cb = codec.CachedBlock(
+                data,
+                data.shape[1], data.shape[0],
+                constants.SUB_BLOCK_WIDTH, constants.SUB_BLOCK_HEIGHT,
+            self.codec_id,
+                target_window.xoff,  # origin_x
+                target_window.yoff  # origin_y
+            )
+            self._cache[cache_key] = cb, minimum
+
+
+    def _read_array_for_area(
+        self,
+        target_area: Area,
+        target_projection: MapProjection,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+    ) -> Any:
+        assert self._projection is not None
+        assert self._projection == target_projection
+
+        y_block = (int(y) // constants.YSTEP) * constants.YSTEP
+
+        cache_key = (
+            int(y_block)
+        )
+
+        target_window = Window(
+            xoff=round_down_pixels((target_area.left - self._underlying_area.left) / self._projection.xstep,
+                self._projection.xstep),
+            yoff=round_down_pixels((self._underlying_area.top - target_area.top) / (self._projection.ystep * -1.0),
+                self._projection.ystep * -1.0),
+            xsize=round_up_pixels(
+                (target_area.right - target_area.left) / self._projection.xstep,
+                self._projection.xstep
+            ),
+            ysize=round_up_pixels(
+                (target_area.top - target_area.bottom) / (self._projection.ystep * -1.0),
+                (self._projection.ystep * -1.0)
+            ),
+        )
+
+        if self.compress and cache_key in self._cache:
             if (constants.VERBOSE_CACHE):
-                print(f"RasterLayer cache miss - writing")
+                print(f"RasterLayer cache hit")
             if self.codec_id < 0:
-                self._cache[target_window] = (result, result.shape, result.dtype)
-            else:
-                handle = codec.make_codec(self.codec_id)
-                codec.encode_array(handle, result.astype(np.int32))
-                self._cache[target_window] = (handle, result.shape, result.dtype)
+                result, origin_x, origin_y, shape, dtype = self._cache[cache_key] 
+                local_x = target_window.xoff - origin_x
+                local_y = target_window.yoff - origin_y
+                return result[local_y:local_y+height, local_x:local_x+width]
+
+            block, minimum = self._cache[cache_key]
+
+            # Translate to block-local coords
+            local_x = target_window.xoff - block.origin_x
+            local_y = target_window.yoff - block.origin_y
+
+            tiles_x = range(
+                local_x // constants.SUB_BLOCK_WIDTH,
+                (local_x + width + constants.SUB_BLOCK_WIDTH - 1) // constants.SUB_BLOCK_WIDTH
+            )
+            tiles_y = range(
+                local_y // constants.SUB_BLOCK_HEIGHT,
+                (local_y + height + constants.SUB_BLOCK_HEIGHT - 1) // constants.SUB_BLOCK_HEIGHT
+            )
+
+            out = np.zeros((height, width), dtype=np.int32)
+            for ty in tiles_y:
+                for tx in tiles_x:
+                    tile = block.decode_tile(tx, ty)
+                    x0, y0 = tx * constants.SUB_BLOCK_WIDTH, ty * constants.SUB_BLOCK_HEIGHT
+                    x1, y1 = x0 + tile.shape[1], y0 + tile.shape[0]
+
+                    # overlap with requested window (in block-local coords)
+                    ox0 = max(local_x, x0)
+                    oy0 = max(local_y, y0)
+                    ox1 = min(local_x + width, x1)
+                    oy1 = min(local_y + height, y1)
+
+                    if ox1 > ox0 and oy1 > oy0:
+                        out[oy0-local_y:oy1-local_y, ox0-local_x:ox1-local_x] = \
+                            tile[oy0-y0:oy1-y0, ox0-x0:ox1-x0]
+
+            out += 0 if minimum >= 0 else minimum
+            return out.astype(dtype_to_backed(self.datatype))
+        else:
+            assert False
+
+        t0 = time.time()
+        result = self._read_array_with_window(x, y, width, height, target_window)
+        t1 = time.time()
+        constants.TIME_SPENT_LOADING += t1 - t0
+
+        # if self.compress:
+        #     if (constants.VERBOSE_CACHE):
+        #         print(f"RasterLayer cache miss - writing")
+        #     if self.codec_id < 0:
+        #         self._cache[target_window] = (result, result.shape, result.dtype)
+        #     else:
+        #         cb = codec.CachedBlock(
+        #             result.astype(np.int32),
+        #             result.shape[1], result.shape[0],
+        #             constants.SUB_BLOCK_WIDTH, constants.SUB_BLOCK_HEIGHT,
+        #             self.codec_id
+        #         )
+        #         self._cache[target_window] = cb
             
         return result
 
