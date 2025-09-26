@@ -100,16 +100,16 @@ class LayerMathMixin:
         return LayerOperation(self, op.NE, other, window_op=WindowOperation.UNION)
 
     def __lt__(self, other):
-        return LayerOperation(self, op.LT, other, window_op=WindowOperation.UNION)
+        return LayerOperation(self, op.LT, other, window_op=WindowOperation.INTERSECTION)
 
     def __le__(self, other):
-        return LayerOperation(self, op.LE, other, window_op=WindowOperation.UNION)
+        return LayerOperation(self, op.LE, other, window_op=WindowOperation.INTERSECTION)
 
     def __gt__(self, other):
-        return LayerOperation(self, op.GT, other, window_op=WindowOperation.UNION)
+        return LayerOperation(self, op.GT, other, window_op=WindowOperation.INTERSECTION)
 
     def __ge__(self, other):
-        return LayerOperation(self, op.GE, other, window_op=WindowOperation.UNION)
+        return LayerOperation(self, op.GE, other, window_op=WindowOperation.INTERSECTION)
 
     def __and__(self, other):
         return LayerOperation(self, op.AND, other, window_op=WindowOperation.INTERSECTION)
@@ -376,31 +376,17 @@ class LayerOperation(LayerMathMixin):
         if rhs is not None:
             if backend.isscalar(rhs):
                 self.rhs = LayerConstant(rhs)
-                rhs_dtype = getattr(self.rhs, "datatype", None)
             elif isinstance(rhs, (backend.array_t)):
                 if rhs.shape == ():
                     self.rhs = LayerConstant(rhs.item())
-                    rhs_dtype = getattr(self.rhs, "datatype", None)
                 else:
                     raise ValueError("Numpy arrays are no allowed")
             else:
                 if not lhs.map_projection == rhs.map_projection:
                     raise ValueError("Not all layers are at the same pixel scale")
                 self.rhs = rhs
-                rhs_dtype = getattr(rhs, "datatype", None)
         else:
             self.rhs = None
-            rhs_dtype = None
-
-        lhs_dtype = getattr(lhs, "datatype", None)
-
-        # --- Promotion rule (only apply once, after rhs is resolved) ---
-        if lhs_dtype == DataType.Int32 or rhs_dtype == DataType.Int32:
-            self._datatype = DataType.Int32
-        elif lhs_dtype is not None:
-            self._datatype = lhs_dtype
-        else:
-            self._datatype = rhs_dtype
 
         if other is not None:
             if backend.isscalar(other):
@@ -534,7 +520,8 @@ class LayerOperation(LayerMathMixin):
 
     @property
     def datatype(self) -> DataType:
-        return self._datatype
+        # TODO: Work out how to indicate type promotion via numpy
+        return self.lhs.datatype
 
     @property
     @deprecation.deprecated(
@@ -583,16 +570,16 @@ class LayerOperation(LayerMathMixin):
             step += (2 * self.buffer_padding)
 
         # Always use the child’s own window if it has one
-        # lhs_window = getattr(self.lhs, "window", target_window)
-        self.lhs._stage(area, projection, index, step, target_window)
+        lhs_window = getattr(self.lhs, "window", target_window)
+        self.lhs._stage(area, projection, index, step, lhs_window)
 
         if self.rhs is not None:
-            # rhs_window = getattr(self.rhs, "window", target_window)
-            self.rhs._stage(area, projection, index, step, target_window)
+            rhs_window = getattr(self.rhs, "window", target_window)
+            self.rhs._stage(area, projection, index, step, rhs_window)
 
         if self.other is not None:
-            # other_window = getattr(self.other, "window", target_window)
-            self.other._stage(area, projection, index, step, target_window)
+            other_window = getattr(self.other, "window", target_window)
+            self.other._stage(area, projection, index, step, other_window)
         
 
     def _eval(
