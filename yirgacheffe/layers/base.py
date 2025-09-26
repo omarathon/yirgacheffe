@@ -314,9 +314,7 @@ class YirgacheffeLayer(LayerMathMixin):
         assert self._projection is not None
         assert self._projection == target_projection
         
-        cache_key = (
-            int(y)
-        )
+        cache_key = int(y)
 
         target_window = Window(
             xoff=round_down_pixels((target_area.left - self._underlying_area.left) / self._projection.xstep,
@@ -344,7 +342,7 @@ class YirgacheffeLayer(LayerMathMixin):
         if (constants.VERBOSE_CACHE):
             print(f"RasterLayer stage")
         if self.codec_id < 0:
-            self._cache[cache_key] = (result, target_window.xoff, target_window.yoff, result.shape, result.dtype)
+            self._cache[cache_key] = (result, x, y, result.shape, result.dtype)
         else:
             data = result.astype(np.int32)
             minimum = data.min()
@@ -354,9 +352,9 @@ class YirgacheffeLayer(LayerMathMixin):
                 data,
                 data.shape[1], data.shape[0],
                 constants.SUB_BLOCK_WIDTH, constants.SUB_BLOCK_HEIGHT,
-            self.codec_id,
-                target_window.xoff,  # origin_x
-                target_window.yoff  # origin_y
+                self.codec_id,
+                x,  # origin_x
+                y  # origin_y
             )
             self._cache[cache_key] = cb, minimum
 
@@ -375,39 +373,22 @@ class YirgacheffeLayer(LayerMathMixin):
 
         y_block = (int(y) // constants.YSTEP) * constants.YSTEP
 
-        cache_key = (
-            int(y_block)
-        )
-
-        target_window = Window(
-            xoff=round_down_pixels((target_area.left - self._underlying_area.left) / self._projection.xstep,
-                self._projection.xstep),
-            yoff=round_down_pixels((self._underlying_area.top - target_area.top) / (self._projection.ystep * -1.0),
-                self._projection.ystep * -1.0),
-            xsize=round_up_pixels(
-                (target_area.right - target_area.left) / self._projection.xstep,
-                self._projection.xstep
-            ),
-            ysize=round_up_pixels(
-                (target_area.top - target_area.bottom) / (self._projection.ystep * -1.0),
-                (self._projection.ystep * -1.0)
-            ),
-        )
+        cache_key = int(y_block)
 
         if self.compress and cache_key in self._cache:
             if (constants.VERBOSE_CACHE):
                 print(f"RasterLayer cache hit")
             if self.codec_id < 0:
                 result, origin_x, origin_y, shape, dtype = self._cache[cache_key] 
-                local_x = target_window.xoff - origin_x
-                local_y = target_window.yoff - origin_y
+                local_x = x - origin_x
+                local_y = y - origin_y
                 return result[local_y:local_y+height, local_x:local_x+width]
 
             block, minimum = self._cache[cache_key]
 
             # Translate to block-local coords
-            local_x = target_window.xoff - block.origin_x
-            local_y = target_window.yoff - block.origin_y
+            local_x = x - block.origin_x
+            local_y = y - block.origin_y
 
             tiles_x = range(
                 local_x // constants.SUB_BLOCK_WIDTH,
@@ -436,7 +417,7 @@ class YirgacheffeLayer(LayerMathMixin):
                             tile[oy0-y0:oy1-y0, ox0-x0:ox1-x0]
 
             out += 0 if minimum >= 0 else minimum
-            return out.astype(dtype_to_backed(self.datatype))
+            return out
         else:
             assert False
 

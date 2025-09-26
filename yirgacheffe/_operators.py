@@ -570,16 +570,13 @@ class LayerOperation(LayerMathMixin):
             step += (2 * self.buffer_padding)
 
         # Always use the child’s own window if it has one
-        lhs_window = getattr(self.lhs, "window", target_window)
-        self.lhs._stage(area, projection, index, step, lhs_window)
+        self.lhs._stage(area, projection, index, step, target_window)
 
         if self.rhs is not None:
-            rhs_window = getattr(self.rhs, "window", target_window)
-            self.rhs._stage(area, projection, index, step, rhs_window)
+            self.rhs._stage(area, projection, index, step, target_window)
 
         if self.other is not None:
-            other_window = getattr(self.other, "window", target_window)
-            self.other._stage(area, projection, index, step, other_window)
+            self.other._stage(area, projection, index, step, target_window)
         
 
     def _eval(

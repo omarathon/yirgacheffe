@@ -469,9 +469,7 @@ class VectorLayer(YirgacheffeLayer):
         assert projection is not None
 
         # Define cache key directly from arguments
-        cache_key = (
-            int(y)
-        )
+        cache_key = int(y)
 
         if not self.compress or cache_key in self._cache:
             return
@@ -547,9 +545,7 @@ class VectorLayer(YirgacheffeLayer):
         y_block = (int(y) // constants.YSTEP) * constants.YSTEP
 
         # Define cache key directly from arguments
-        cache_key = (
-            int(y_block)
-        )
+        cache_key = int(y_block)
 
         if self.compress and cache_key in self._cache:
             if (constants.VERBOSE_CACHE):
@@ -588,7 +584,7 @@ class VectorLayer(YirgacheffeLayer):
                         if ox1 > ox0 and oy1 > oy0:
                             out[oy0-local_y:oy1-local_y, ox0-local_x:ox1-local_x] = \
                                 tile[oy0-y0:oy1-y0, ox0-x0:ox1-x0]
-                return out.astype(dtype_to_backed(self.datatype))
+                return out
         else:
             assert False
             
