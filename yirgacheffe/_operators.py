@@ -20,12 +20,14 @@ import numpy.typing as npt
 from osgeo import gdal
 from dill import dumps, loads # type: ignore
 
-from . import constants, __version__
+from . import constants, __version__, metrics
 from .rounding import round_up_pixels, round_down_pixels
 from .window import Area, PixelScale, MapProjection, Window
 from ._backends import backend
 from ._backends.enumeration import operators as op
 from ._backends.enumeration import dtype as DataType
+
+import time
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
@@ -43,8 +45,11 @@ class LayerConstant:
 
     def __str__(self) -> str:
         return str(self.val)
+    
+    def _stage(self, _area, _projection, _y, _y_step, _target_window):
+        pass
 
-    def _eval(self, _area, _projection, _index, _step, _target_window):
+    def _eval(self, _area, _projection, _y, _y_step, _target_window, _x, _x_step):
         return self.val
 
     @property
@@ -100,26 +105,49 @@ class LayerMathMixin:
 
     def __or__(self, other):
         return LayerOperation(self, op.OR, other, window_op=WindowOperation.UNION)
+    
+    def _stage(
+        self,
+        area,
+        projection,
+        y,
+        y_step,
+        target_window
+    ):
+        try:
+            window = self.window if target_window is None else target_window
+            self._stage_array_for_area(area, projection, 0, y, window.xsize, y_step)
+        except AttributeError:
+            self._stage_array_for_area(
+                area,
+                projection,
+                0,
+                y,
+                target_window.xsize if target_window else 1,
+                y_step
+            )
 
     def _eval(
         self,
         area,
         projection,
-        index,
-        step,
-        target_window=None
+        y,
+        y_step,
+        target_window,
+        x,
+        x_step
     ):
         try:
             window = self.window if target_window is None else target_window
-            return self._read_array_for_area(area, projection, 0, index, window.xsize, step)
+            return self._read_array_for_area(area, projection, x, y, x_step, y_step)
         except AttributeError:
             return self._read_array_for_area(
                 area,
                 projection,
-                0,
-                index,
-                target_window.xsize if target_window else 1,
-                step
+                x,
+                y,
+                x_step if target_window else 1,
+                y_step
             )
 
     def nan_to_num(self, nan=0, posinf=None, neginf=None):
@@ -508,14 +536,14 @@ class LayerOperation(LayerMathMixin):
             except AttributeError:
                 pass
         return projection
-
-    def _eval(
+    
+    def _stage(
         self,
         area: Area,
         projection: MapProjection,
-        index: int,
-        step: int,
-        target_window:Optional[Window]=None
+        y: int,
+        y_step: int,
+        target_window:Optional[Window]
     ):
 
         if self.buffer_padding:
@@ -525,7 +553,40 @@ class LayerOperation(LayerMathMixin):
             # The index doesn't need updating because we updated area/window
             step += (2 * self.buffer_padding)
 
-        lhs_data = self.lhs._eval(area, projection, index, step, target_window)
+        self.lhs._stage(area, projection, y, y_step, target_window)
+
+        if self.operator is None:
+            return
+
+        if self.other is not None:
+            assert self.rhs is not None
+            self.rhs._stage(area, projection, y, y_step, target_window)
+            self.other._stage(area, projection, y, y_step, target_window)
+            return
+
+        if self.rhs is not None:
+            self.rhs._stage(area, projection, y, y_step, target_window)
+            return
+
+    def _eval(
+        self,
+        area: Area,
+        projection: MapProjection,
+        y: int,
+        y_step: int,
+        target_window:Optional[Window],
+        x: int,
+        x_step: int
+    ):
+
+        if self.buffer_padding:
+            if target_window:
+                target_window = target_window.grow(self.buffer_padding)
+            area = area.grow(self.buffer_padding * projection.xstep) # NOTE OMAR: maybe check projection.xstep... might be source of badness
+            # The index doesn't need updating because we updated area/window
+            y_step += (2 * self.buffer_padding)
+
+        lhs_data = self.lhs._eval(area, projection, y, y_step, target_window, x, x_step)
 
         if self.operator is None:
             return lhs_data
@@ -538,12 +599,12 @@ class LayerOperation(LayerMathMixin):
 
         if self.other is not None:
             assert self.rhs is not None
-            rhs_data = self.rhs._eval(area, projection, index, step, target_window)
-            other_data = self.other._eval(area, projection, index, step, target_window)
+            rhs_data = self.rhs._eval(area, projection, y, y_step, target_window, x, x_step)
+            other_data = self.other._eval(area, projection, y, y_step, target_window, x, x_step)
             return operator(lhs_data, rhs_data, other_data, **self.kwargs)
 
         if self.rhs is not None:
-            rhs_data = self.rhs._eval(area, projection, index, step, target_window)
+            rhs_data = self.rhs._eval(area, projection, y, y_step, target_window, x, x_step)
             return operator(lhs_data, rhs_data, **self.kwargs)
 
         return operator(lhs_data, **self.kwargs)
@@ -553,15 +614,31 @@ class LayerOperation(LayerMathMixin):
         # we force the sum to be done in float64 also. Otherwise we
         # see variable results depending on chunk size, as different parts
         # of the sum are done in different types.
+
         res = 0.0
         computation_window = self.window
         projection = self.map_projection
+        area = self._get_operation_area(projection)
+
+        t0 = time.time()
+        
         for yoffset in range(0, computation_window.ysize, self.ystep):
-            step=self.ystep
-            if yoffset+step > computation_window.ysize:
-                step = computation_window.ysize - yoffset
-            chunk = self._eval(self._get_operation_area(projection), projection, yoffset, step, computation_window)
-            res += backend.sum_op(chunk)
+            step_y_big=self.ystep
+            if yoffset+step_y_big > computation_window.ysize:
+                step_y_big = computation_window.ysize - yoffset
+
+            self._stage(area, projection, yoffset, step_y_big, computation_window)
+
+            for y_sub_start in range(0, step_y_big, constants.SUB_BLOCK_HEIGHT):
+                step_y_sub = min(constants.SUB_BLOCK_HEIGHT, step_y_big - y_sub_start)
+                for x_sub_start in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH): # NOTE OMAR: maybe check if `computation_window.xsize` is right here (supposed to be full width of row)
+                    step_x_sub = min(constants.SUB_BLOCK_WIDTH, computation_window.xsize - x_sub_start)
+                    tile = self._eval(
+                        area, projection, yoffset + y_sub_start, step_y_sub, computation_window, x_sub_start, step_x_sub
+                    )
+                    res += backend.sum_op(tile)
+
+        metrics.TIME_SPENT_CALCULATING += time.time() - t0
         return res
 
     def min(self):
@@ -634,25 +711,40 @@ class LayerOperation(LayerMathMixin):
 
         total = 0.0
 
+        t0 = time.time()
+
         for yoffset in range(0, computation_window.ysize, self.ystep):
             if callback:
                 callback(yoffset / computation_window.ysize)
-            step=self.ystep
-            if yoffset+step > computation_window.ysize:
-                step = computation_window.ysize - yoffset
-            chunk = self._eval(computation_area, projection, yoffset, step, computation_window)
-            if isinstance(chunk, (float, int)):
-                chunk = backend.full((step, destination_window.xsize), chunk)
-            band.WriteArray(
-                backend.demote_array(chunk),
-                destination_window.xoff,
-                yoffset + destination_window.yoff,
-            )
-            if and_sum:
-                total += backend.sum_op(chunk)
+            step_y_big=self.ystep
+            if yoffset+step_y_big > computation_window.ysize:
+                step_y_big = computation_window.ysize - yoffset
+
+            self._stage(computation_area, projection, yoffset, step_y_big, computation_window)
+
+            for y_sub_start in range(0, step_y_big, constants.SUB_BLOCK_HEIGHT):
+                step_y_sub = min(constants.SUB_BLOCK_HEIGHT, step_y_big - y_sub_start)
+                for x_sub_start in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH): # NOTE OMAR: maybe check if `computation_window.xsize` is right here (supposed to be full width of row)
+                    step_x_sub = min(constants.SUB_BLOCK_WIDTH, computation_window.xsize - x_sub_start)
+                    tile = self._eval(
+                        computation_area, projection, yoffset + y_sub_start, step_y_sub, computation_window, x_sub_start, step_x_sub
+                    )
+                    if isinstance(tile, (float, int)):
+                        tile = backend.full((step_y_sub, step_x_sub), tile) # NOTE OMAR: swapped destination_window.xsize for step_x_sub, might be bad
+                    t0w = time.time()
+                    band.WriteArray(
+                        backend.demote_array(tile),
+                        destination_window.xoff,
+                        yoffset + destination_window.yoff,
+                    )
+                    metrics.TIME_SPENT_WRITING += t0w - time.time()
+                    if and_sum:
+                        total += backend.sum_op(tile)
+
         if callback:
             callback(1.0)
 
+        metrics.TIME_SPENT_CALCULATING += t0 - time.time()
         return total if and_sum else None
 
     def _parallel_worker(self, index, shared_mem, sem, np_dtype, width, input_queue, output_queue, computation_window):

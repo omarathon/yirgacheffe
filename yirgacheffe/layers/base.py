@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 from typing import Any, Optional, Sequence, Tuple
 
 import deprecation
@@ -9,6 +10,10 @@ from ..rounding import almost_equal, round_up_pixels, round_down_pixels
 from ..window import Area, MapProjection, PixelScale, Window
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
+
+import codec
+import numpy as np
+from .. import constants, metrics
 
 class YirgacheffeLayer(LayerMathMixin):
     """The common base class for the different layer types. Most still inherit from RasterLayer as deep down
@@ -31,6 +36,14 @@ class YirgacheffeLayer(LayerMathMixin):
         self.name = name
 
         self.reset_window()
+
+        self._cache = None
+        self._codec_id = None
+        self._full_width = None
+        self._full_height = None
+
+    def enable_cache(self, codec_id):
+        self._codec_id = codec_id
 
     def close(self) -> None:
         pass
@@ -286,7 +299,7 @@ class YirgacheffeLayer(LayerMathMixin):
     ) -> Any:
         raise NotImplementedError("Must be overridden by subclass")
 
-    def _read_array_for_area(
+    def _stage_array_for_area(
         self,
         target_area: Area,
         target_projection: MapProjection,
@@ -294,9 +307,35 @@ class YirgacheffeLayer(LayerMathMixin):
         y: int,
         width: int,
         height: int,
-    ) -> Any:
+    ):
+        # this is expected to come in YSTEP chunks of a full row.
         assert self._projection is not None
         assert self._projection == target_projection
+
+        assert y % constants.YSTEP == 0 and x == 0
+
+        assert self._full_width is None or width == self._full_width
+        assert self._full_height is None or height <= self._full_height
+
+        if self._full_width is None:
+            self._full_width = width
+            self._full_height = height
+            self._sw_full = min(constants.SUB_BLOCK_WIDTH, self._full_width)
+            self._sh_full = min(constants.SUB_BLOCK_HEIGHT, self._full_height)
+            self._cache = codec.CompressedBlockSequence(
+                self._sw_full, 
+                self._sh_full,
+                self._codec_id
+            )
+
+        assert self._cache is not None
+
+        tx = x / self._sw_full
+        ty = y / self._sh_full
+        total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
+        tile_id = ty * total_tiles_x + tx
+
+        if self._cache.HasBlock(tile_id): return
 
         target_window = Window(
             xoff=round_down_pixels((target_area.left - self._underlying_area.left) / self._projection.xstep,
@@ -312,7 +351,47 @@ class YirgacheffeLayer(LayerMathMixin):
                 (self._projection.ystep * -1.0)
             ),
         )
-        return self._read_array_with_window(x, y, width, height, target_window)
+        t0 = time.time()
+        data = self._read_array_with_window(x, y, width, height, target_window)
+        metrics.TIME_SPENT_LOADING += time.time() - t0 
+
+        # cache block of tiles
+        t0 = time.time()
+        assert data.type is np.int32
+        self._cache.WriteBlocks(data, data.shape[1], data.shape[0])
+        metrics.TIME_SPENT_COMPRESSING += time.time() - t0
+
+            
+    def _read_array_for_area(
+        self,
+        target_area: Area,
+        target_projection: MapProjection,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+    ) -> Any:
+        assert self._projection is not None
+        assert self._projection == target_projection
+
+        assert self._cache is not None \
+            and self._full_width is not None \
+            and self._full_height is not None \
+            and x % self._sw_full == 0 \
+            and y % self._sh_full == 0 \
+            and width <= self._sw_full \
+            and height <= self._sh_full
+
+        tx = x / self._sw_full
+        ty = y / self._sh_full
+        total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
+        tile_id = ty * total_tiles_x + tx
+
+        t0 = time.time()
+        res = self._cache.ReadBlock(tile_id, width, height)
+        metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
+        assert res.type == np.int32
+        return res
 
     def _read_array(self, x: int, y: int, width: int, height: int) -> Any:
         return self._read_array_with_window(x, y, width, height, self.window)

@@ -14,6 +14,11 @@ from .rasters import RasterLayer
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
 
+import codec
+import numpy as np
+from .. import constants, metrics
+import time
+
 def _validate_burn_value(burn_value: Any, layer: ogr.Layer) -> DataType: # pylint: disable=R0911
     if isinstance(burn_value, str):
         # burn value is field name, so validate it
@@ -176,6 +181,9 @@ class VectorLayer(YirgacheffeLayer):
     when the data is fetched, so there is no explosive memeory cost, but fetching small units (e.g., one
     line at a time) can be quite slow, so recommended that you fetch reasonable chunks each time (or
     modify this class so that it chunks things internally)."""
+
+    def enable_cache(self, codec_id):
+        self._codec_id = codec_id
 
     @classmethod
     def layer_from_file_like(
@@ -367,6 +375,11 @@ class VectorLayer(YirgacheffeLayer):
 
         super().__init__(area, projection)
 
+        self._cache = None
+        self._codec_id = None
+        self._full_width = None
+        self._full_height = None
+
 
     def _get_operation_area(self, projection: Optional[MapProjection]=None) -> Area:
         if self._projection is not None and projection is not None and self._projection != projection:
@@ -445,8 +458,8 @@ class VectorLayer(YirgacheffeLayer):
     @property
     def datatype(self) -> DataType:
         return self._datatype
-
-    def _read_array_for_area(
+    
+    def _stage_array_for_area(
         self,
         target_area: Area,
         target_projection: Optional[MapProjection],
@@ -458,11 +471,39 @@ class VectorLayer(YirgacheffeLayer):
         projection = target_projection if target_projection is not None else self._projection
         assert projection is not None
 
+        assert y % constants.YSTEP == 0 and x == 0
+
+        assert self._full_width is None or width == self._full_width
+        assert self._full_height is None or height <= self._full_height
+
+        if self._full_width is None:
+            self._full_width = width
+            self._full_height = height
+
+            self._sw_full = min(constants.SUB_BLOCK_WIDTH, self._full_width)
+            self._sh_full = min(constants.SUB_BLOCK_HEIGHT, self._full_height)
+
+            self._cache = codec.CompressedBlockSequence(
+                self._sw_full, 
+                self._sh_full,
+                self._codec_id
+            )
+
+        assert self._cache is not None
+
+        tx = x / self._sw_full
+        ty = y / self._sh_full
+        total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
+        tile_id = ty * total_tiles_x + tx
+
+        if self._cache.HasBlock(tile_id): return
+
         if self._original is None:
             self._unpark()
         if (width <= 0) or (height <= 0):
             raise ValueError("Request dimensions must be positive and non-zero")
 
+        t0 = time.time()
         # I did try recycling this object to save allocation/dealloction, but in practice it
         # seemed to only make things slower (particularly as you need to zero the memory each time yourself)
         dataset = gdal.GetDriverByName('mem').Create(
@@ -493,6 +534,43 @@ class VectorLayer(YirgacheffeLayer):
             raise ValueError("Burn value for layer should be number or field name")
 
         res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
+        metrics.TIME_SPENT_LOADING += time.time() - t0
+
+        # cache block of tiles
+        t0 = time.time()
+        assert res.type is np.int32
+        self._cache.WriteBlocks(res, res.shape[1], res.shape[0])
+        metrics.TIME_SPENT_COMPRESSING += time.time() - t0
+
+    def _read_array_for_area(
+        self,
+        target_area: Area,
+        target_projection: Optional[MapProjection],
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+    ) -> Any:
+        projection = target_projection if target_projection is not None else self._projection
+        assert projection is not None
+
+        assert self._cache is not None \
+            and self._full_width is not None \
+            and self._full_height is not None \
+            and x % self._sw_full == 0 \
+            and y % self._sh_full == 0 \
+            and width <= self._sw_full \
+            and height <= self._sh_full
+        
+        tx = x / self._sw_full
+        ty = y / self._sh_full
+        total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
+        tile_id = ty * total_tiles_x + tx
+
+        t0 = time.time()
+        res = self._cache.ReadBlock(tile_id, width, height)
+        metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
+        assert res.type == np.int32
         return res
 
     def _read_array_with_window(self, _x, _y, _width, _height, _window) -> Any:
