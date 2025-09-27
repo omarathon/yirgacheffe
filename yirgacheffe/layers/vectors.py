@@ -14,6 +14,9 @@ from .rasters import RasterLayer
 from .._backends import backend
 from .._backends.enumeration import dtype as DataType
 
+from .. import metrics
+import time
+
 def _validate_burn_value(burn_value: Any, layer: ogr.Layer) -> DataType: # pylint: disable=R0911
     if isinstance(burn_value, str):
         # burn value is field name, so validate it
@@ -463,6 +466,7 @@ class VectorLayer(YirgacheffeLayer):
         if (width <= 0) or (height <= 0):
             raise ValueError("Request dimensions must be positive and non-zero")
 
+        t0 = time.time()
         # I did try recycling this object to save allocation/dealloction, but in practice it
         # seemed to only make things slower (particularly as you need to zero the memory each time yourself)
         dataset = gdal.GetDriverByName('mem').Create(
@@ -493,6 +497,7 @@ class VectorLayer(YirgacheffeLayer):
             raise ValueError("Burn value for layer should be number or field name")
 
         res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
+        metrics.TIME_SPENT_LOADING += time.time() - t0
         return res
 
     def _read_array_with_window(self, _x, _y, _width, _height, _window) -> Any:

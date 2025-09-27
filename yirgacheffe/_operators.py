@@ -20,12 +20,14 @@ import numpy.typing as npt
 from osgeo import gdal
 from dill import dumps, loads # type: ignore
 
-from . import constants, __version__
+from . import constants, __version__, metrics
 from .rounding import round_up_pixels, round_down_pixels
 from .window import Area, PixelScale, MapProjection, Window
 from ._backends import backend
 from ._backends.enumeration import operators as op
 from ._backends.enumeration import dtype as DataType
+
+import time
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
@@ -556,12 +558,14 @@ class LayerOperation(LayerMathMixin):
         res = 0.0
         computation_window = self.window
         projection = self.map_projection
+        t0 = time.time()
         for yoffset in range(0, computation_window.ysize, self.ystep):
             step=self.ystep
             if yoffset+step > computation_window.ysize:
                 step = computation_window.ysize - yoffset
             chunk = self._eval(self._get_operation_area(projection), projection, yoffset, step, computation_window)
             res += backend.sum_op(chunk)
+        metrics.TIME_SPENT_CALCULATING += time.time() - t0
         return res
 
     def min(self):
@@ -634,6 +638,8 @@ class LayerOperation(LayerMathMixin):
 
         total = 0.0
 
+        t0 = time.time()
+
         for yoffset in range(0, computation_window.ysize, self.ystep):
             if callback:
                 callback(yoffset / computation_window.ysize)
@@ -643,16 +649,19 @@ class LayerOperation(LayerMathMixin):
             chunk = self._eval(computation_area, projection, yoffset, step, computation_window)
             if isinstance(chunk, (float, int)):
                 chunk = backend.full((step, destination_window.xsize), chunk)
+            t0w = time.time()
             band.WriteArray(
                 backend.demote_array(chunk),
                 destination_window.xoff,
                 yoffset + destination_window.yoff,
             )
+            metrics.TIME_SPENT_WRITING += time.time() - t0w
             if and_sum:
                 total += backend.sum_op(chunk)
         if callback:
             callback(1.0)
 
+        metrics.TIME_SPENT_CALCULATING += time.time() - t0
         return total if and_sum else None
 
     def _parallel_worker(self, index, shared_mem, sem, np_dtype, width, input_queue, output_queue, computation_window):
