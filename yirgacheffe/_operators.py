@@ -736,8 +736,8 @@ class LayerOperation(LayerMathMixin):
                     t0w = time.time()
                     band.WriteArray(
                         backend.demote_array(tile),
-                        destination_window.xoff,
-                        yoffset + destination_window.yoff,
+                        destination_window.xoff + x_sub_start,
+                        yoffset + destination_window.yoff + y_sub_start,
                     )
                     metrics.TIME_SPENT_WRITING += time.time() - t0w
                     if and_sum:
