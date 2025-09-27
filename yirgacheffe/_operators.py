@@ -521,6 +521,7 @@ class LayerOperation(LayerMathMixin):
     ):
 
         if self.buffer_padding:
+            print("oh no buffer padding")
             if target_window:
                 target_window = target_window.grow(self.buffer_padding)
             area = area.grow(self.buffer_padding * projection.xstep)
@@ -648,6 +649,7 @@ class LayerOperation(LayerMathMixin):
                 step = computation_window.ysize - yoffset
             chunk = self._eval(computation_area, projection, yoffset, step, computation_window)
             if isinstance(chunk, (float, int)):
+                print("oh no float int")
                 chunk = backend.full((step, destination_window.xsize), chunk)
             t0w = time.time()
             band.WriteArray(
