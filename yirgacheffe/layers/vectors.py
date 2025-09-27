@@ -491,12 +491,12 @@ class VectorLayer(YirgacheffeLayer):
 
         assert self._cache is not None
 
-        tx = x / self._sw_full
-        ty = y / self._sh_full
+        tx = x // self._sw_full
+        ty = y // self._sh_full
         total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
         tile_id = ty * total_tiles_x + tx
 
-        if self._cache.HasBlock(tile_id): return
+        if self._cache.has_block(tile_id): return
 
         if self._original is None:
             self._unpark()
@@ -538,8 +538,8 @@ class VectorLayer(YirgacheffeLayer):
 
         # cache block of tiles
         t0 = time.time()
-        assert res.type is np.int32
-        self._cache.WriteBlocks(res, res.shape[1], res.shape[0])
+        assert res.dtype == np.int32
+        self._cache.write_blocks(res, res.shape[1], res.shape[0])
         metrics.TIME_SPENT_COMPRESSING += time.time() - t0
 
     def _read_array_for_area(
@@ -562,15 +562,15 @@ class VectorLayer(YirgacheffeLayer):
             and width <= self._sw_full \
             and height <= self._sh_full
         
-        tx = x / self._sw_full
-        ty = y / self._sh_full
+        tx = x // self._sw_full
+        ty = y // self._sh_full
         total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
         tile_id = ty * total_tiles_x + tx
 
         t0 = time.time()
-        res = self._cache.ReadBlock(tile_id, width, height)
+        res = self._cache.read_block(tile_id, width, height)
         metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
-        assert res.type == np.int32
+        assert res.dtype == np.int32
         return res
 
     def _read_array_with_window(self, _x, _y, _width, _height, _window) -> Any:

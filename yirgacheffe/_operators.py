@@ -737,14 +737,14 @@ class LayerOperation(LayerMathMixin):
                         destination_window.xoff,
                         yoffset + destination_window.yoff,
                     )
-                    metrics.TIME_SPENT_WRITING += t0w - time.time()
+                    metrics.TIME_SPENT_WRITING += time.time() - t0w
                     if and_sum:
                         total += backend.sum_op(tile)
 
         if callback:
             callback(1.0)
 
-        metrics.TIME_SPENT_CALCULATING += t0 - time.time()
+        metrics.TIME_SPENT_CALCULATING += time.time() - t0
         return total if and_sum else None
 
     def _parallel_worker(self, index, shared_mem, sem, np_dtype, width, input_queue, output_queue, computation_window):

@@ -330,12 +330,12 @@ class YirgacheffeLayer(LayerMathMixin):
 
         assert self._cache is not None
 
-        tx = x / self._sw_full
-        ty = y / self._sh_full
+        tx = x // self._sw_full
+        ty = y // self._sh_full
         total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
         tile_id = ty * total_tiles_x + tx
 
-        if self._cache.HasBlock(tile_id): return
+        if self._cache.has_block(tile_id): return
 
         target_window = Window(
             xoff=round_down_pixels((target_area.left - self._underlying_area.left) / self._projection.xstep,
@@ -357,8 +357,8 @@ class YirgacheffeLayer(LayerMathMixin):
 
         # cache block of tiles
         t0 = time.time()
-        assert data.type is np.int32
-        self._cache.WriteBlocks(data, data.shape[1], data.shape[0])
+        assert data.dtype == np.int32
+        self._cache.write_blocks(data, data.shape[1], data.shape[0])
         metrics.TIME_SPENT_COMPRESSING += time.time() - t0
 
             
@@ -382,15 +382,15 @@ class YirgacheffeLayer(LayerMathMixin):
             and width <= self._sw_full \
             and height <= self._sh_full
 
-        tx = x / self._sw_full
-        ty = y / self._sh_full
+        tx = x // self._sw_full
+        ty = y // self._sh_full
         total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
         tile_id = ty * total_tiles_x + tx
 
         t0 = time.time()
-        res = self._cache.ReadBlock(tile_id, width, height)
+        res = self._cache.read_block(tile_id, width, height)
         metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
-        assert res.type == np.int32
+        assert res.dtype == np.int32
         return res
 
     def _read_array(self, x: int, y: int, width: int, height: int) -> Any:
