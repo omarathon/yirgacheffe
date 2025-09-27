@@ -580,6 +580,7 @@ class LayerOperation(LayerMathMixin):
     ):
 
         if self.buffer_padding:
+            print("oh no buffer padding")
             if target_window:
                 target_window = target_window.grow(self.buffer_padding)
             area = area.grow(self.buffer_padding * projection.xstep) # NOTE OMAR: maybe check projection.xstep... might be source of badness
@@ -730,6 +731,7 @@ class LayerOperation(LayerMathMixin):
                         computation_area, projection, yoffset + y_sub_start, step_y_sub, computation_window, x_sub_start, step_x_sub
                     )
                     if isinstance(tile, (float, int)):
+                        print("oh no float int")
                         tile = backend.full((step_y_sub, step_x_sub), tile) # NOTE OMAR: swapped destination_window.xsize for step_x_sub, might be bad
                     t0w = time.time()
                     band.WriteArray(
