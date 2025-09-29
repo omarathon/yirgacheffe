@@ -39,11 +39,18 @@ class YirgacheffeLayer(LayerMathMixin):
 
         self._cache = None
         self._codec_id = None
+        self._morton_mode = None
         self._full_width = None
         self._full_height = None
 
-    def enable_cache(self, codec_id):
+    def enable_cache(self, codec_id, morton_mode=0):
         self._codec_id = codec_id
+        self._morton_mode = morton_mode
+    
+    def size_bytes_cached(self):
+        if self._cache is None:
+            return 0
+        return self._cache.size_bytes()
 
     def close(self) -> None:
         pass
@@ -322,11 +329,39 @@ class YirgacheffeLayer(LayerMathMixin):
             self._full_height = height
             self._sw_full = min(constants.SUB_BLOCK_WIDTH, self._full_width)
             self._sh_full = min(constants.SUB_BLOCK_HEIGHT, self._full_height)
-            self._cache = codec.CompressedBlockSequence(
-                self._sw_full, 
-                self._sh_full,
-                self._codec_id
-            )
+            if self._codec_id in [98, 99]:
+                assert self.datatype in [DataType.Byte, DataType.Int16, DataType.Int32, DataType.Float32]
+                if self.datatype == DataType.Byte:
+                    self._cache = codec.RawBlockSequenceByte(
+                        self._sw_full, 
+                        self._sh_full,
+                        self._codec_id
+                    )
+                elif self.datatype == DataType.Int16:
+                    self._cache = codec.RawBlockSequenceInt16(
+                        self._sw_full, 
+                        self._sh_full,
+                        self._codec_id
+                    )
+                elif self.datatype == DataType.Int32:
+                    self._cache = codec.RawBlockSequenceInt32(
+                        self._sw_full, 
+                        self._sh_full,
+                        self._codec_id
+                    )
+                else:
+                    self._cache = codec.RawBlockSequenceFloat(
+                        self._sw_full, 
+                        self._sh_full,
+                        self._codec_id
+                    )
+            else:
+                self._cache = codec.CompressedBlockSequence(
+                    self._sw_full, 
+                    self._sh_full,
+                    self._codec_id,
+                    self._morton_mode
+                )
 
         assert self._cache is not None
 

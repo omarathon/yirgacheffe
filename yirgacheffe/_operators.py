@@ -294,6 +294,9 @@ class LayerMathMixin:
 
     def sum(self):
         return LayerOperation(self).sum()
+    
+    def stage(self):
+        return LayerOperation(self).stage()
 
     def min(self):
         return LayerOperation(self).min()
@@ -628,8 +631,6 @@ class LayerOperation(LayerMathMixin):
             if yoffset+step_y_big > computation_window.ysize:
                 step_y_big = computation_window.ysize - yoffset
 
-            self._stage(area, projection, yoffset, step_y_big, computation_window)
-
             for y_sub_start in range(0, step_y_big, constants.SUB_BLOCK_HEIGHT):
                 step_y_sub = min(constants.SUB_BLOCK_HEIGHT, step_y_big - y_sub_start)
                 for x_sub_start in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH): # NOTE OMAR: maybe check if `computation_window.xsize` is right here (supposed to be full width of row)
@@ -641,6 +642,25 @@ class LayerOperation(LayerMathMixin):
 
         metrics.TIME_SPENT_CALCULATING += time.time() - t0
         return res
+
+    def stage(self):
+        computation_window = self.window
+        projection = self.map_projection
+        area = self._get_operation_area(projection)
+
+        t0 = time.time()
+
+        if constants.DEBUG_DIMENSIONS:
+            print(f"DIMENSIONS: x={computation_window.xsize}, y={computation_window.ysize}")
+        
+        for yoffset in range(0, computation_window.ysize, self.ystep):
+            step_y_big=self.ystep
+            if yoffset+step_y_big > computation_window.ysize:
+                step_y_big = computation_window.ysize - yoffset
+
+            self._stage(area, projection, yoffset, step_y_big, computation_window)
+
+        metrics.TIME_SPENT_PREPROCESSING += time.time() - t0
 
     def min(self):
         res = None
@@ -720,8 +740,6 @@ class LayerOperation(LayerMathMixin):
             step_y_big=self.ystep
             if yoffset+step_y_big > computation_window.ysize:
                 step_y_big = computation_window.ysize - yoffset
-
-            self._stage(computation_area, projection, yoffset, step_y_big, computation_window)
 
             for y_sub_start in range(0, step_y_big, constants.SUB_BLOCK_HEIGHT):
                 step_y_sub = min(constants.SUB_BLOCK_HEIGHT, step_y_big - y_sub_start)
