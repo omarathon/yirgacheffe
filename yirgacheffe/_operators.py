@@ -631,6 +631,7 @@ class LayerOperation(LayerMathMixin):
         t0 = time.time()
         
         for yoffset in range(0, computation_window.ysize, self.ystep):
+            print(f"{yoffset} / {computation_window.ysize}")
             step_y_big=self.ystep
             if yoffset+step_y_big > computation_window.ysize:
                 step_y_big = computation_window.ysize - yoffset

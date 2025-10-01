@@ -333,31 +333,42 @@ class YirgacheffeLayer(LayerMathMixin):
             if self._codec_id in [98, 99]:
                 assert self.datatype in [DataType.Byte, DataType.Int16, DataType.Int32, DataType.Float32]
                 if self.datatype == DataType.Byte:
+                    print("byte")
                     self._cache = codec.RawBlockSequenceByte(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 elif self.datatype == DataType.Int16:
+                    print("int16")
                     self._cache = codec.RawBlockSequenceInt16(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 elif self.datatype == DataType.Int32:
+                    print("int32")
                     self._cache = codec.RawBlockSequenceInt32(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 else:
+                    print("float")
                     self._cache = codec.RawBlockSequenceFloat(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
             else:
-                self._cache = codec.ExpBlockSequence(
+                print("exp")
+                # self._cache = codec.ExpBlockSequence(
+                #     self._sw_full, 
+                #     self._sh_full,
+                #     self._codec_id,
+                #     self._morton_mode
+                # )
+                self._cache = codec.CompressedBlockSequence(
                     self._sw_full, 
                     self._sh_full,
                     self._codec_id,
@@ -413,13 +424,14 @@ class YirgacheffeLayer(LayerMathMixin):
         assert self._projection == target_projection
 
         if self._cache is not None:
-            assert self._cache is not None \
-                and self._full_width is not None \
-                and self._full_height is not None \
-                and x % self._sw_full == 0 \
-                and y % self._sh_full == 0 \
-                and width <= self._sw_full \
-                and height <= self._sh_full
+            print(f"x{x} y{y}")
+            assert self._cache is not None 
+            assert self._full_width is not None 
+            assert self._full_height is not None 
+            assert x % self._sw_full == 0 
+            assert y % self._sh_full == 0 
+            assert width <= self._sw_full 
+            assert height <= self._sh_full
 
             tx = x // self._sw_full
             ty = y // self._sh_full
