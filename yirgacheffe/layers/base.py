@@ -314,6 +314,7 @@ class YirgacheffeLayer(LayerMathMixin):
         y: int,
         width: int,
         height: int,
+        final: bool
     ):
         # this is expected to come in YSTEP chunks of a full row.
         assert self._projection is not None
@@ -356,7 +357,7 @@ class YirgacheffeLayer(LayerMathMixin):
                         self._codec_id
                     )
             else:
-                self._cache = codec.CompressedBlockSequence(
+                self._cache = codec.ExpBlockSequence(
                     self._sw_full, 
                     self._sh_full,
                     self._codec_id,
@@ -392,8 +393,10 @@ class YirgacheffeLayer(LayerMathMixin):
 
         # cache block of tiles
         t0 = time.time()
-        assert data.dtype == np.int32
         self._cache.write_blocks(data, data.shape[1], data.shape[0])
+
+        # if final:
+        #     self._cache.finalize()
         metrics.TIME_SPENT_COMPRESSING += time.time() - t0
 
             
@@ -409,24 +412,45 @@ class YirgacheffeLayer(LayerMathMixin):
         assert self._projection is not None
         assert self._projection == target_projection
 
-        assert self._cache is not None \
-            and self._full_width is not None \
-            and self._full_height is not None \
-            and x % self._sw_full == 0 \
-            and y % self._sh_full == 0 \
-            and width <= self._sw_full \
-            and height <= self._sh_full
+        if self._cache is not None:
+            assert self._cache is not None \
+                and self._full_width is not None \
+                and self._full_height is not None \
+                and x % self._sw_full == 0 \
+                and y % self._sh_full == 0 \
+                and width <= self._sw_full \
+                and height <= self._sh_full
 
-        tx = x // self._sw_full
-        ty = y // self._sh_full
-        total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
-        tile_id = ty * total_tiles_x + tx
+            tx = x // self._sw_full
+            ty = y // self._sh_full
+            total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
+            tile_id = ty * total_tiles_x + tx
 
+            t0 = time.time()
+            res = self._cache.read_block(tile_id, width, height)
+            metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
+            return res
+        
+        # original
+        target_window = Window(
+            xoff=round_down_pixels((target_area.left - self._underlying_area.left) / self._projection.xstep,
+                self._projection.xstep),
+            yoff=round_down_pixels((self._underlying_area.top - target_area.top) / (self._projection.ystep * -1.0),
+                self._projection.ystep * -1.0),
+            xsize=round_up_pixels(
+                (target_area.right - target_area.left) / self._projection.xstep,
+                self._projection.xstep
+            ),
+            ysize=round_up_pixels(
+                (target_area.top - target_area.bottom) / (self._projection.ystep * -1.0),
+                (self._projection.ystep * -1.0)
+            ),
+        )
         t0 = time.time()
-        res = self._cache.read_block(tile_id, width, height)
-        metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
-        assert res.dtype == np.int32
-        return res
+        data = self._read_array_with_window(x, y, width, height, target_window)
+        metrics.TIME_SPENT_LOADING += time.time() - t0 
+        return data
+
 
     def _read_array(self, x: int, y: int, width: int, height: int) -> Any:
         return self._read_array_with_window(x, y, width, height, self.window)

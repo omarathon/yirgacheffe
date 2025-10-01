@@ -29,6 +29,7 @@ from ._backends.enumeration import dtype as DataType
 
 import time
 
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
@@ -46,7 +47,7 @@ class LayerConstant:
     def __str__(self) -> str:
         return str(self.val)
     
-    def _stage(self, _area, _projection, _y, _y_step, _target_window):
+    def _stage(self, _area, _projection, _y, _y_step, _target_window, final):
         pass
 
     def _eval(self, _area, _projection, _y, _y_step, _target_window, _x, _x_step):
@@ -112,11 +113,12 @@ class LayerMathMixin:
         projection,
         y,
         y_step,
-        target_window
+        target_window,
+        final
     ):
         try:
             window = self.window if target_window is None else target_window
-            self._stage_array_for_area(area, projection, 0, y, window.xsize, y_step)
+            self._stage_array_for_area(area, projection, 0, y, window.xsize, y_step, final)
         except AttributeError:
             self._stage_array_for_area(
                 area,
@@ -124,7 +126,8 @@ class LayerMathMixin:
                 0,
                 y,
                 target_window.xsize if target_window else 1,
-                y_step
+                y_step,
+                final
             )
 
     def _eval(
@@ -546,7 +549,8 @@ class LayerOperation(LayerMathMixin):
         projection: MapProjection,
         y: int,
         y_step: int,
-        target_window:Optional[Window]
+        target_window:Optional[Window],
+        final
     ):
 
         if self.buffer_padding:
@@ -556,19 +560,19 @@ class LayerOperation(LayerMathMixin):
             # The index doesn't need updating because we updated area/window
             step += (2 * self.buffer_padding)
 
-        self.lhs._stage(area, projection, y, y_step, target_window)
+        self.lhs._stage(area, projection, y, y_step, target_window, final)
 
         if self.operator is None:
             return
 
         if self.other is not None:
             assert self.rhs is not None
-            self.rhs._stage(area, projection, y, y_step, target_window)
-            self.other._stage(area, projection, y, y_step, target_window)
+            self.rhs._stage(area, projection, y, y_step, target_window, final)
+            self.other._stage(area, projection, y, y_step, target_window, final)
             return
 
         if self.rhs is not None:
-            self.rhs._stage(area, projection, y, y_step, target_window)
+            self.rhs._stage(area, projection, y, y_step, target_window, final)
             return
 
     def _eval(
@@ -658,7 +662,8 @@ class LayerOperation(LayerMathMixin):
             if yoffset+step_y_big > computation_window.ysize:
                 step_y_big = computation_window.ysize - yoffset
 
-            self._stage(area, projection, yoffset, step_y_big, computation_window)
+            final = (yoffset + step_y_big >= computation_window.ysize)
+            self._stage(area, projection, yoffset, step_y_big, computation_window, final)
 
         metrics.TIME_SPENT_PREPROCESSING += time.time() - t0
 

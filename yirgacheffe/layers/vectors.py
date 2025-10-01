@@ -474,6 +474,7 @@ class VectorLayer(YirgacheffeLayer):
         y: int,
         width: int,
         height: int,
+        final: bool
     ) -> Any:
         projection = target_projection if target_projection is not None else self._projection
         assert projection is not None
@@ -517,7 +518,7 @@ class VectorLayer(YirgacheffeLayer):
                         self._codec_id
                     )
             else:
-                self._cache = codec.CompressedBlockSequence(
+                self._cache = codec.ExpBlockSequence(
                     self._sw_full, 
                     self._sh_full,
                     self._codec_id,
@@ -573,8 +574,10 @@ class VectorLayer(YirgacheffeLayer):
 
         # cache block of tiles
         t0 = time.time()
-        assert res.dtype == np.int32
         self._cache.write_blocks(res, res.shape[1], res.shape[0])
+
+        # if final:
+        #     self._cache.finalize()
         metrics.TIME_SPENT_COMPRESSING += time.time() - t0
 
     def _read_array_for_area(
@@ -589,23 +592,62 @@ class VectorLayer(YirgacheffeLayer):
         projection = target_projection if target_projection is not None else self._projection
         assert projection is not None
 
-        assert self._cache is not None \
-            and self._full_width is not None \
-            and self._full_height is not None \
-            and x % self._sw_full == 0 \
-            and y % self._sh_full == 0 \
-            and width <= self._sw_full \
-            and height <= self._sh_full
-        
-        tx = x // self._sw_full
-        ty = y // self._sh_full
-        total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
-        tile_id = ty * total_tiles_x + tx
+        if self._cache is not None:
+            assert self._cache is not None \
+                and self._full_width is not None \
+                and self._full_height is not None \
+                and x % self._sw_full == 0 \
+                and y % self._sh_full == 0 \
+                and width <= self._sw_full \
+                and height <= self._sh_full
+            
+            tx = x // self._sw_full
+            ty = y // self._sh_full
+            total_tiles_x = (self._full_width + self._sw_full - 1) // self._sw_full
+            tile_id = ty * total_tiles_x + tx
 
+            t0 = time.time()
+            res = self._cache.read_block(tile_id, width, height)
+            metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
+            return res
+        
+        # original (unacached)
+        if self._original is None:
+            self._unpark()
+        if (width <= 0) or (height <= 0):
+            raise ValueError("Request dimensions must be positive and non-zero")
         t0 = time.time()
-        res = self._cache.read_block(tile_id, width, height)
-        metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
-        assert res.dtype == np.int32
+        # I did try recycling this object to save allocation/dealloction, but in practice it
+        # seemed to only make things slower (particularly as you need to zero the memory each time yourself)
+        dataset = gdal.GetDriverByName('mem').Create(
+            'mem',
+            width,
+            height,
+            1,
+            self.datatype.to_gdal(),
+            []
+        )
+        if not dataset:
+            raise MemoryError('Failed to create memory mask')
+
+        dataset.SetProjection(projection.name)
+        dataset.SetGeoTransform([
+            target_area.left + (x * projection.xstep),
+            projection.xstep,
+            0.0,
+            target_area.top + (y * projection.ystep),
+            0.0,
+            projection.ystep
+        ])
+        if isinstance(self.burn_value, (int, float)):
+            gdal.RasterizeLayer(dataset, [1], self.layer, burn_values=[self.burn_value], options=["ALL_TOUCHED=TRUE"])
+        elif isinstance(self.burn_value, str):
+            gdal.RasterizeLayer(dataset, [1], self.layer, options=[f"ATTRIBUTE={self.burn_value}", "ALL_TOUCHED=TRUE"])
+        else:
+            raise ValueError("Burn value for layer should be number or field name")
+
+        res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
+        metrics.TIME_SPENT_LOADING += time.time() - t0
         return res
 
     def _read_array_with_window(self, _x, _y, _width, _height, _window) -> Any:
