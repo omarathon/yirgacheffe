@@ -333,42 +333,31 @@ class YirgacheffeLayer(LayerMathMixin):
             if self._codec_id in [98, 99]:
                 assert self.datatype in [DataType.Byte, DataType.Int16, DataType.Int32, DataType.Float32]
                 if self.datatype == DataType.Byte:
-                    print("byte")
                     self._cache = codec.RawBlockSequenceByte(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 elif self.datatype == DataType.Int16:
-                    print("int16")
                     self._cache = codec.RawBlockSequenceInt16(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 elif self.datatype == DataType.Int32:
-                    print("int32")
                     self._cache = codec.RawBlockSequenceInt32(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 else:
-                    print("float")
                     self._cache = codec.RawBlockSequenceFloat(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
             else:
-                print("exp")
-                # self._cache = codec.ExpBlockSequence(
-                #     self._sw_full, 
-                #     self._sh_full,
-                #     self._codec_id,
-                #     self._morton_mode
-                # )
-                self._cache = codec.CompressedBlockSequence(
+                self._cache = codec.ExpBlockSequence(
                     self._sw_full, 
                     self._sh_full,
                     self._codec_id,
@@ -406,8 +395,6 @@ class YirgacheffeLayer(LayerMathMixin):
         t0 = time.time()
         self._cache.write_blocks(data, data.shape[1], data.shape[0])
 
-        # if final:
-        #     self._cache.finalize()
         metrics.TIME_SPENT_COMPRESSING += time.time() - t0
 
             
@@ -424,7 +411,6 @@ class YirgacheffeLayer(LayerMathMixin):
         assert self._projection == target_projection
 
         if self._cache is not None:
-            print(f"x{x} y{y}")
             assert self._cache is not None 
             assert self._full_width is not None 
             assert self._full_height is not None 
@@ -443,7 +429,7 @@ class YirgacheffeLayer(LayerMathMixin):
             metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
             return res
         
-        # original
+        # original - do not time IO here as it's not part of an optimizable calculation
         target_window = Window(
             xoff=round_down_pixels((target_area.left - self._underlying_area.left) / self._projection.xstep,
                 self._projection.xstep),
@@ -458,10 +444,8 @@ class YirgacheffeLayer(LayerMathMixin):
                 (self._projection.ystep * -1.0)
             ),
         )
-        t0 = time.time()
-        data = self._read_array_with_window(x, y, width, height, target_window)
-        metrics.TIME_SPENT_LOADING += time.time() - t0 
-        return data
+        res = self._read_array_with_window(x, y, width, height, target_window)
+        return res
 
 
     def _read_array(self, x: int, y: int, width: int, height: int) -> Any:

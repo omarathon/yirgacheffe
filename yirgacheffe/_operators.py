@@ -278,8 +278,8 @@ class LayerMathMixin:
     def shader_apply(self, func, other=None):
         return ShaderStyleOperation(self, func, other)
 
-    def save(self, destination_layer, and_sum=False, callback=None, band=1):
-        return LayerOperation(self).save(destination_layer, and_sum, callback, band)
+    def save(self, destination_layer, and_sum=False, callback=None, band=1, do_subchunk=True):
+        return LayerOperation(self).save(destination_layer, and_sum, callback, band, do_subchunk)
 
     def parallel_save(self, destination_layer, and_sum=False, callback=None, parallelism=None, band=1):
         return LayerOperation(self).parallel_save(destination_layer, and_sum, callback, parallelism, band)
@@ -295,11 +295,11 @@ class LayerMathMixin:
     ) -> Optional[float]:
         return LayerOperation(self).to_geotiff(filename, and_sum, parallelism)
 
-    def sum(self):
-        return LayerOperation(self).sum()
+    def sum(self, do_subchunk = True):
+        return LayerOperation(self).sum(do_subchunk)
     
-    def stage(self):
-        return LayerOperation(self).stage()
+    def stage(self, area=None):
+        return LayerOperation(self).stage(area)
 
     def min(self):
         return LayerOperation(self).min()
@@ -587,7 +587,7 @@ class LayerOperation(LayerMathMixin):
     ):
 
         if self.buffer_padding:
-            print("oh no buffer padding")
+            print("WARNING: oh no buffer padding")
             if target_window:
                 target_window = target_window.grow(self.buffer_padding)
             area = area.grow(self.buffer_padding * projection.xstep) # NOTE OMAR: maybe check projection.xstep... might be source of badness
@@ -617,54 +617,79 @@ class LayerOperation(LayerMathMixin):
 
         return operator(lhs_data, **self.kwargs)
 
-    def sum(self):
+    def sum(self, do_subchunk = True):
         # The result accumulator is float64, and for precision reasons
         # we force the sum to be done in float64 also. Otherwise we
         # see variable results depending on chunk size, as different parts
         # of the sum are done in different types.
 
-        res = 0.0
-        computation_window = self.window
+        metrics.SHOULD_MEASURE_IO = do_subchunk
+
+        if do_subchunk:
+
+            res = 0.0
+            computation_window = self.window
+            projection = self.map_projection
+            area = self._get_operation_area(projection)
+
+            t0 = time.time()
+            
+            for yoffset in range(0, computation_window.ysize, self.ystep):
+                step_y_big=self.ystep
+                if yoffset+step_y_big > computation_window.ysize:
+                    step_y_big = computation_window.ysize - yoffset
+
+                for y_sub_start in range(0, step_y_big, constants.SUB_BLOCK_HEIGHT):
+                    step_y_sub = min(constants.SUB_BLOCK_HEIGHT, step_y_big - y_sub_start)
+                    for x_sub_start in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH): # NOTE OMAR: maybe check if `computation_window.xsize` is right here (supposed to be full width of row)
+                        step_x_sub = min(constants.SUB_BLOCK_WIDTH, computation_window.xsize - x_sub_start)
+                        tile = self._eval(
+                            area, projection, yoffset + y_sub_start, step_y_sub, computation_window, x_sub_start, step_x_sub
+                        )
+                        res += backend.sum_op(tile)
+
+            metrics.TIME_SPENT_CALCULATING += time.time() - t0
+            return res
+        
+        else:
+            res = 0.0
+            computation_window = self.window
+            projection = self.map_projection
+            for yoffset in range(0, computation_window.ysize, self.ystep):
+                step=self.ystep
+                if yoffset+step > computation_window.ysize:
+                    step = computation_window.ysize - yoffset
+                chunk = self._eval(self._get_operation_area(projection), projection, yoffset, step, computation_window, 0, computation_window.xsize)
+                res += backend.sum_op(chunk)
+            return res
+        
+    def stage(self, area: Optional[Area] = None):
+        metrics.SHOULD_MEASURE_IO = True
+
+        if area is not None:
+            proj = self.map_projection
+            computation_window = Window(
+                xoff=round_down_pixels((area.left - self.lhs._underlying_area.left) / proj.xstep, proj.xstep),
+                yoff=round_down_pixels((self.lhs._underlying_area.top - area.top) / (proj.ystep * -1.0), proj.ystep * -1.0),
+                xsize=round_up_pixels((area.right - area.left) / proj.xstep, proj.xstep),
+                ysize=round_up_pixels((area.top - area.bottom) / (proj.ystep * -1.0), proj.ystep * -1.0),
+            )
+            op_area = area
+        else:
+            computation_window = self.window
+            op_area = self.area
+
         projection = self.map_projection
-        area = self._get_operation_area(projection)
 
         t0 = time.time()
-        
-        for yoffset in range(0, computation_window.ysize, self.ystep):
-            print(f"{yoffset} / {computation_window.ysize}")
-            step_y_big=self.ystep
-            if yoffset+step_y_big > computation_window.ysize:
-                step_y_big = computation_window.ysize - yoffset
 
-            for y_sub_start in range(0, step_y_big, constants.SUB_BLOCK_HEIGHT):
-                step_y_sub = min(constants.SUB_BLOCK_HEIGHT, step_y_big - y_sub_start)
-                for x_sub_start in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH): # NOTE OMAR: maybe check if `computation_window.xsize` is right here (supposed to be full width of row)
-                    step_x_sub = min(constants.SUB_BLOCK_WIDTH, computation_window.xsize - x_sub_start)
-                    tile = self._eval(
-                        area, projection, yoffset + y_sub_start, step_y_sub, computation_window, x_sub_start, step_x_sub
-                    )
-                    res += backend.sum_op(tile)
-
-        metrics.TIME_SPENT_CALCULATING += time.time() - t0
-        return res
-
-    def stage(self):
-        computation_window = self.window
-        projection = self.map_projection
-        area = self._get_operation_area(projection)
-
-        t0 = time.time()
-
-        if constants.DEBUG_DIMENSIONS:
-            print(f"DIMENSIONS: x={computation_window.xsize}, y={computation_window.ysize}")
-        
         for yoffset in range(0, computation_window.ysize, self.ystep):
             step_y_big=self.ystep
             if yoffset+step_y_big > computation_window.ysize:
                 step_y_big = computation_window.ysize - yoffset
 
             final = (yoffset + step_y_big >= computation_window.ysize)
-            self._stage(area, projection, yoffset, step_y_big, computation_window, final)
+            self._stage(op_area, projection, yoffset, step_y_big, computation_window, final)
 
         metrics.TIME_SPENT_PREPROCESSING += time.time() - t0
 
@@ -696,11 +721,13 @@ class LayerOperation(LayerMathMixin):
                 res = chunk_max
         return res
 
-    def save(self, destination_layer, and_sum=False, callback=None, band=1) -> Optional[float]:
+    def save(self, destination_layer, and_sum=False, callback=None, band=1, do_subchunk=True) -> Optional[float]:
         """
         Calling save will write the output of the operation to the provied layer.
         If you provide sum as true it will additionall compute the sum and return that.
         """
+
+        metrics.SHOULD_MEASURE_IO = do_subchunk
 
         if destination_layer is None:
             raise ValueError("Layer is required")
@@ -738,40 +765,66 @@ class LayerOperation(LayerMathMixin):
 
         total = 0.0
 
-        t0 = time.time()
+        if do_subchunk:
 
-        for yoffset in range(0, computation_window.ysize, self.ystep):
+            t0 = time.time()
+
+            for yoffset in range(0, computation_window.ysize, self.ystep):
+                if callback:
+                    callback(yoffset / computation_window.ysize)
+                step_y_big=self.ystep
+                if yoffset+step_y_big > computation_window.ysize:
+                    step_y_big = computation_window.ysize - yoffset
+
+                for y_sub_start in range(0, step_y_big, constants.SUB_BLOCK_HEIGHT):
+                    step_y_sub = min(constants.SUB_BLOCK_HEIGHT, step_y_big - y_sub_start)
+                    for x_sub_start in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH): # NOTE OMAR: maybe check if `computation_window.xsize` is right here (supposed to be full width of row)
+                        step_x_sub = min(constants.SUB_BLOCK_WIDTH, computation_window.xsize - x_sub_start)
+                        tile = self._eval(
+                            computation_area, projection, yoffset + y_sub_start, step_y_sub, computation_window, x_sub_start, step_x_sub
+                        )
+                        if isinstance(tile, (float, int)):
+                            print("WARNING: oh no float int")
+                            tile = backend.full((step_y_sub, step_x_sub), tile) # NOTE OMAR: swapped destination_window.xsize for step_x_sub, might be bad
+                        t0w = time.time()
+                        band.WriteArray(
+                            backend.demote_array(tile),
+                            destination_window.xoff + x_sub_start,
+                            yoffset + destination_window.yoff + y_sub_start,
+                        )
+                        metrics.TIME_SPENT_WRITING += time.time() - t0w
+                        if and_sum:
+                            total += backend.sum_op(tile)
+
             if callback:
-                callback(yoffset / computation_window.ysize)
-            step_y_big=self.ystep
-            if yoffset+step_y_big > computation_window.ysize:
-                step_y_big = computation_window.ysize - yoffset
+                callback(1.0)
 
-            for y_sub_start in range(0, step_y_big, constants.SUB_BLOCK_HEIGHT):
-                step_y_sub = min(constants.SUB_BLOCK_HEIGHT, step_y_big - y_sub_start)
-                for x_sub_start in range(0, computation_window.xsize, constants.SUB_BLOCK_WIDTH): # NOTE OMAR: maybe check if `computation_window.xsize` is right here (supposed to be full width of row)
-                    step_x_sub = min(constants.SUB_BLOCK_WIDTH, computation_window.xsize - x_sub_start)
-                    tile = self._eval(
-                        computation_area, projection, yoffset + y_sub_start, step_y_sub, computation_window, x_sub_start, step_x_sub
-                    )
-                    if isinstance(tile, (float, int)):
-                        print("oh no float int")
-                        tile = backend.full((step_y_sub, step_x_sub), tile) # NOTE OMAR: swapped destination_window.xsize for step_x_sub, might be bad
-                    t0w = time.time()
-                    band.WriteArray(
-                        backend.demote_array(tile),
-                        destination_window.xoff + x_sub_start,
-                        yoffset + destination_window.yoff + y_sub_start,
-                    )
-                    metrics.TIME_SPENT_WRITING += time.time() - t0w
-                    if and_sum:
-                        total += backend.sum_op(tile)
+            metrics.TIME_SPENT_CALCULATING += time.time() - t0
+            return total if and_sum else None
+        
+        else:
 
-        if callback:
-            callback(1.0)
+            for yoffset in range(0, computation_window.ysize, self.ystep):
+                if callback:
+                    callback(yoffset / computation_window.ysize)
+                step=self.ystep
+                if yoffset+step > computation_window.ysize:
+                    step = computation_window.ysize - yoffset
+                chunk = self._eval(computation_area, projection, yoffset, step, computation_window, 0, computation_window.xsize)
+                if isinstance(chunk, (float, int)):
+                    chunk = backend.full((step, destination_window.xsize), chunk)
+                band.WriteArray(
+                    backend.demote_array(chunk),
+                    destination_window.xoff,
+                    yoffset + destination_window.yoff,
+                )
+                if and_sum:
+                    total += backend.sum_op(chunk)
+            if callback:
+                callback(1.0)
 
-        metrics.TIME_SPENT_CALCULATING += time.time() - t0
-        return total if and_sum else None
+            return total if and_sum else None
+        
 
     def _parallel_worker(self, index, shared_mem, sem, np_dtype, width, input_queue, output_queue, computation_window):
         arr = np.ndarray((self.ystep, width), dtype=np_dtype, buffer=shared_mem.buf)

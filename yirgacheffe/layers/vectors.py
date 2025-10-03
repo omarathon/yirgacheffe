@@ -494,42 +494,31 @@ class VectorLayer(YirgacheffeLayer):
             if self._codec_id in [98, 99]:
                 assert self.datatype in [DataType.Byte, DataType.Int16, DataType.Int32, DataType.Float32]
                 if self.datatype == DataType.Byte:
-                    print("byte")
                     self._cache = codec.RawBlockSequenceByte(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 elif self.datatype == DataType.Int16:
-                    print("int16")
                     self._cache = codec.RawBlockSequenceInt16(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 elif self.datatype == DataType.Int32:
-                    print("int32")
                     self._cache = codec.RawBlockSequenceInt32(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
                 else:
-                    print("float")
                     self._cache = codec.RawBlockSequenceFloat(
                         self._sw_full, 
                         self._sh_full,
                         self._codec_id
                     )
             else:
-                print("exp")
-                # self._cache = codec.ExpBlockSequence(
-                #     self._sw_full, 
-                #     self._sh_full,
-                #     self._codec_id,
-                #     self._morton_mode
-                # )
-                self._cache = codec.CompressedBlockSequence(
+                self._cache = codec.ExpBlockSequence(
                     self._sw_full, 
                     self._sh_full,
                     self._codec_id,
@@ -604,7 +593,7 @@ class VectorLayer(YirgacheffeLayer):
         assert projection is not None
 
         if self._cache is not None:
-            print(f"x{x} y{y}")
+            # print(f"x{x} y{y}")
             assert self._cache is not None
             assert self._full_width is not None
             assert self._full_height is not None
@@ -623,12 +612,12 @@ class VectorLayer(YirgacheffeLayer):
             metrics.TIME_SPENT_DECOMPRESSING += time.time() - t0
             return res
         
-        # original (unacached)
+        # original (unacached) - do not time IO here as it's not part of an optimizable calculation
         if self._original is None:
             self._unpark()
         if (width <= 0) or (height <= 0):
             raise ValueError("Request dimensions must be positive and non-zero")
-        t0 = time.time()
+
         # I did try recycling this object to save allocation/dealloction, but in practice it
         # seemed to only make things slower (particularly as you need to zero the memory each time yourself)
         dataset = gdal.GetDriverByName('mem').Create(
@@ -659,7 +648,6 @@ class VectorLayer(YirgacheffeLayer):
             raise ValueError("Burn value for layer should be number or field name")
 
         res = backend.promote(dataset.ReadAsArray(0, 0, width, height))
-        metrics.TIME_SPENT_LOADING += time.time() - t0
         return res
 
     def _read_array_with_window(self, _x, _y, _width, _height, _window) -> Any:
