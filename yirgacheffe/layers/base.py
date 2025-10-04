@@ -333,31 +333,65 @@ class YirgacheffeLayer(LayerMathMixin):
             if self._codec_id in [98, 99]:
                 assert self.datatype in [DataType.Byte, DataType.Int16, DataType.Int32, DataType.Float32]
                 if self.datatype == DataType.Byte:
-                    self._cache = codec.RawBlockSequenceByte(
+                    # self._cache = codec.RawBlockSequenceByte(
+                    #     self._sw_full, 
+                    #     self._sh_full,
+                    #     self._codec_id
+                    # )
+                    # self._cache = codec.RawMemcpyBlockSequenceByte(
+                    #     self._sw_full, 
+                    #     self._sh_full,
+                    # )
+                    self._cache = codec.RawNoCopyBlockSequenceByte(
                         self._sw_full, 
                         self._sh_full,
-                        self._codec_id
                     )
                 elif self.datatype == DataType.Int16:
-                    self._cache = codec.RawBlockSequenceInt16(
+                    # self._cache = codec.RawBlockSequenceInt16(
+                    #     self._sw_full, 
+                    #     self._sh_full,
+                    #     self._codec_id
+                    # )
+                    # self._cache = codec.RawMemcpyBlockSequenceInt16(
+                    #     self._sw_full, 
+                    #     self._sh_full,
+                    # )
+                    self._cache = codec.RawNoCopyBlockSequenceInt16(
                         self._sw_full, 
                         self._sh_full,
-                        self._codec_id
                     )
                 elif self.datatype == DataType.Int32:
-                    self._cache = codec.RawBlockSequenceInt32(
+                    # self._cache = codec.RawBlockSequenceInt32(
+                    #     self._sw_full, 
+                    #     self._sh_full,
+                    #     self._codec_id
+                    # )
+                    # self._cache = codec.RawMemcpyBlockSequenceInt32(
+                    #     self._sw_full, 
+                    #     self._sh_full,
+                    # )
+                    self._cache = codec.RawNoCopyBlockSequenceInt32(
                         self._sw_full, 
                         self._sh_full,
-                        self._codec_id
                     )
                 else:
-                    self._cache = codec.RawBlockSequenceFloat(
+                    # self._cache = codec.RawBlockSequenceFloat(
+                    #     self._sw_full, 
+                    #     self._sh_full,
+                    #     self._codec_id
+                    # )
+                    # self._cache = codec.RawMemcpyBlockSequenceFloat(
+                    #     self._sw_full, 
+                    #     self._sh_full,
+                    # )
+                    self._cache = codec.RawNoCopyBlockSequenceFloat(
                         self._sw_full, 
                         self._sh_full,
-                        self._codec_id
                     )
+                
+                
             else:
-                self._cache = codec.ExpBlockSequence(
+                self._cache = codec.CompressedBlockSequence(
                     self._sw_full, 
                     self._sh_full,
                     self._codec_id,
