@@ -249,8 +249,8 @@ class LayerMathMixin:
     def shader_apply(self, func, other=None):
         return ShaderStyleOperation(self, func, other)
 
-    def save(self, destination_layer, and_sum=False, callback=None, band=1):
-        return LayerOperation(self).save(destination_layer, and_sum, callback, band)
+    def save(self, destination_layer, and_sum=False, callback=None, band=1, do_subchunk = False):
+        return LayerOperation(self).save(destination_layer, and_sum, callback, band, do_subchunk)
 
     def parallel_save(self, destination_layer, and_sum=False, callback=None, parallelism=None, band=1):
         return LayerOperation(self).parallel_save(destination_layer, and_sum, callback, parallelism, band)
@@ -266,8 +266,8 @@ class LayerMathMixin:
     ) -> Optional[float]:
         return LayerOperation(self).to_geotiff(filename, and_sum, parallelism)
 
-    def sum(self):
-        return LayerOperation(self).sum()
+    def sum(self, do_subchunk = False):
+        return LayerOperation(self).sum(do_subchunk)
 
     def min(self):
         return LayerOperation(self).min()
@@ -551,7 +551,7 @@ class LayerOperation(LayerMathMixin):
 
         return operator(lhs_data, **self.kwargs)
 
-    def sum(self):
+    def sum(self, do_subchunk = False):
         # The result accumulator is float64, and for precision reasons
         # we force the sum to be done in float64 also. Otherwise we
         # see variable results depending on chunk size, as different parts
@@ -597,7 +597,7 @@ class LayerOperation(LayerMathMixin):
                 res = chunk_max
         return res
 
-    def save(self, destination_layer, and_sum=False, callback=None, band=1) -> Optional[float]:
+    def save(self, destination_layer, and_sum=False, callback=None, band=1, do_subchunk = False) -> Optional[float]:
         """
         Calling save will write the output of the operation to the provied layer.
         If you provide sum as true it will additionall compute the sum and return that.
