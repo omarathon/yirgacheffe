@@ -552,12 +552,22 @@ class VectorLayer(YirgacheffeLayer):
                 
                 
             else:
-                self._cache = codec.CompressedBlockSequence(
-                    self._sw_full, 
-                    self._sh_full,
-                    self._codec_id,
-                    self._morton_mode
-                )
+                if self.datatype == DataType.Int16:
+                    self._cache = codec.CompressedBlockSequenceInt16(
+                        self._sw_full, 
+                        self._sh_full,
+                        self._codec_id,
+                        self._morton_mode
+                    )
+                elif self.datatype == DataType.Int32:
+                    self._cache = codec.CompressedBlockSequenceInt32(
+                        self._sw_full, 
+                        self._sh_full,
+                        self._codec_id,
+                        self._morton_mode
+                    )
+                else:
+                    assert(False) # unsupported bit width
 
         assert self._cache is not None
 
