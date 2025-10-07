@@ -379,8 +379,8 @@ class RasterLayer(YirgacheffeLayer):
             )).astype(int)
             data = backend.pad(subset, region, mode='constant')
 
-        nodata = self.nodata
-        if not self._ignore_nodata and nodata is not None:
-            data = backend.where(data == nodata, float("nan"), data)
+        # nodata = self.nodata
+        # if not self._ignore_nodata and nodata is not None:
+        #     data = backend.where(data == nodata, float("nan"), data)
 
         return data
