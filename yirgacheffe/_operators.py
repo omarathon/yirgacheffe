@@ -652,6 +652,8 @@ class LayerOperation(LayerMathMixin):
             return res
         
         else:
+            t0 = time.time()
+
             res = 0.0
             computation_window = self.window
             projection = self.map_projection
@@ -661,6 +663,8 @@ class LayerOperation(LayerMathMixin):
                     step = computation_window.ysize - yoffset
                 chunk = self._eval(self._get_operation_area(projection), projection, yoffset, step, computation_window, 0, computation_window.xsize)
                 res += backend.sum_op(chunk)
+
+            metrics.TIME_SPENT_CALCULATING_UNOPTIMISABLE += time.time() - t0
             return res
         
     def stage(self, area: Optional[Area] = None):
@@ -804,6 +808,8 @@ class LayerOperation(LayerMathMixin):
         
         else:
 
+            t0 = time.time()
+
             for yoffset in range(0, computation_window.ysize, self.ystep):
                 if callback:
                     callback(yoffset / computation_window.ysize)
@@ -822,6 +828,8 @@ class LayerOperation(LayerMathMixin):
                     total += backend.sum_op(chunk)
             if callback:
                 callback(1.0)
+
+            metrics.TIME_SPENT_CALCULATING_UNOPTIMISABLE += time.time() - t0
 
             return total if and_sum else None
         
